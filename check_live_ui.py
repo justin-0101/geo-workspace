@@ -75,7 +75,8 @@ def main():
                 checks.append('run view reachable')
 
             page.get_by_role('link', name='模型与平台', exact=True).click()
-            expect(page.get_by_text('DeepSeek')).to_be_visible()
+            expect(page.get_by_role('heading', name='模型与平台')).to_be_visible()
+            expect(page.get_by_text('DeepSeek').first).to_be_visible()
             checks.append('platform list reachable')
             assert not errors, errors
         finally:
