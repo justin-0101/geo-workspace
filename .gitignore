@@ -1,0 +1,18 @@
+# 本地运行数据：含真实主体资料、平台回答原文、截图证据、SQLite 数据库与备份
+# 这些内容只应留在本机，禁止提交到版本库。
+data/
+backups/
+test-results/
+
+# Python 运行产物
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 日志与本地会话
+*.log
+.pi/
+
+# 本机执行记录（含真实诊断过程与数据），不推送
+REBUILD-PROGRESS.md
