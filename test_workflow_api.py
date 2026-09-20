@@ -47,4 +47,32 @@ class APITests(unittest.TestCase):
         data=self.client.get('/api/platforms').json()
         self.assertEqual(len(data['diagnosis']),4);self.assertEqual(len(data['publication']),10)
 
+    def test_login_state_snapshot_covers_browser_platforms(self):
+        from unittest.mock import patch
+        r=self.client.get('/api/platforms/login-state')
+        self.assertEqual(r.status_code,200);d=r.json()
+        browser={s['id'] for s in self.client.get('/api/platforms').json()['publication'] if s['mode']=='browser'}
+        self.assertEqual(set(d['states']),browser)          # 只列可登录的浏览器平台
+        self.assertTrue(all(v['state']=='unknown' for v in d['states'].values()))
+        self.assertEqual(d['states']['zhihu']['label'],'未检测')
+        self.assertFalse(d['session']['active'])
+        self.assertEqual(d['summary']['total'],len(browser))
+        # 打开登录窗口：把真正的浏览器启动换掉，只验证接口契约。
+        with patch('platform_login.start',return_value={'started':True,'message':'已打开登录窗口（知乎）'}) as start:
+            r=self.client.post('/api/platforms/login',json={'platforms':['zhihu']})
+        self.assertEqual(r.status_code,200);body=r.json()
+        self.assertTrue(body['started']);self.assertIn('知乎',body['message'])
+        self.assertIn('states',body)                        # 返回完整快照，前端可直接重绘
+        start.assert_called_once_with(['zhihu'])
+
+    def test_login_probe_refuses_while_browser_busy(self):
+        from process_guard import ProcessGuard
+        guard=ProcessGuard(store.DATA/'browser-execution.lock').acquire()
+        try:
+            r=self.client.post('/api/platforms/login-state/probe',json={'platforms':['zhihu']})
+            self.assertEqual(r.status_code,409)
+            self.assertIn('占用',r.json()['detail'])
+        finally:
+            guard.release()
+
 if __name__=='__main__':unittest.main()

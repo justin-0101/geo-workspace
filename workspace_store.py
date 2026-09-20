@@ -62,7 +62,8 @@ def migrate():
           UNIQUE(run_id,task_id));
         CREATE TABLE IF NOT EXISTS editorial_assets (
           id TEXT PRIMARY KEY, project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
-          action_id TEXT NOT NULL REFERENCES improvement_items(id) ON DELETE CASCADE,
+          action_id TEXT REFERENCES improvement_items(id) ON DELETE CASCADE,
+          source TEXT NOT NULL DEFAULT 'diagnosis', brief TEXT NOT NULL DEFAULT '',
           title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', facts TEXT NOT NULL DEFAULT '',
           status TEXT NOT NULL DEFAULT 'draft', revision INTEGER NOT NULL DEFAULT 1,
           reviewed_revision INTEGER, reviewer TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -73,6 +74,7 @@ def migrate():
           platform TEXT NOT NULL, asset_revision INTEGER NOT NULL,
           title_snapshot TEXT NOT NULL, body_snapshot TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'manual_required', receipt_url TEXT, operator TEXT,
+          mode TEXT NOT NULL DEFAULT 'manual', adapter_note TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           UNIQUE(asset_id,platform,asset_revision));
         CREATE TABLE IF NOT EXISTS workspace_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -80,6 +82,38 @@ def migrate():
           ON execution_runs(project_slug)
           WHERE status IN ('frozen','preflight','ready','running','paused','interrupted','blocked','login');
         ''')
+        # Content may be produced without a diagnosis, so action_id must be optional.
+        info = {row['name']: dict(row) for row in c.execute('PRAGMA table_info(editorial_assets)')}
+        needs_rebuild = ('source' not in info) or bool(info.get('action_id', {}).get('notnull'))
+        if needs_rebuild:
+            c.execute('PRAGMA foreign_keys=OFF')
+            c.execute('PRAGMA legacy_alter_table=ON')
+            c.executescript('''
+            CREATE TABLE IF NOT EXISTS editorial_assets_rebuilt (
+              id TEXT PRIMARY KEY, project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
+              action_id TEXT REFERENCES improvement_items(id) ON DELETE CASCADE,
+              source TEXT NOT NULL DEFAULT 'diagnosis', brief TEXT NOT NULL DEFAULT '',
+              title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', facts TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL DEFAULT 'draft', revision INTEGER NOT NULL DEFAULT 1,
+              reviewed_revision INTEGER, reviewer TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              UNIQUE(action_id));
+            INSERT OR IGNORE INTO editorial_assets_rebuilt
+              (id,project_slug,action_id,source,brief,title,body,facts,status,revision,
+               reviewed_revision,reviewer,created_at,updated_at)
+              SELECT id,project_slug,action_id,'diagnosis','',title,body,facts,status,revision,
+                     reviewed_revision,reviewer,created_at,updated_at
+              FROM editorial_assets;
+            DROP TABLE editorial_assets;
+            ALTER TABLE editorial_assets_rebuilt RENAME TO editorial_assets;
+            ''')
+            c.execute('PRAGMA legacy_alter_table=OFF')
+            c.execute('PRAGMA foreign_keys=ON')
+        # Publishing jobs record which adapter handled them and why they still need a human.
+        job_cols = {row['name'] for row in c.execute('PRAGMA table_info(publishing_jobs)')}
+        for name, ddl in (('mode', "TEXT NOT NULL DEFAULT 'manual'"),
+                          ('adapter_note', "TEXT NOT NULL DEFAULT ''")):
+            if name not in job_cols:
+                c.execute(f'ALTER TABLE publishing_jobs ADD COLUMN {name} {ddl}')
 
 
 def record_event(c, slug, kind, title):

@@ -74,6 +74,30 @@ def main():
                 expect(page.locator('#project-view')).to_be_visible()
                 checks.append('run view reachable')
 
+            page.get_by_role('link', name='内容生产', exact=True).click()
+            expect(page.get_by_role('button', name='＋ 直接生成内容', exact=True)).to_be_visible()
+            page.screenshot(path=str(OUT / 'live-content.png'), full_page=True)
+            checks.append('direct content entry available without diagnosis')
+
+            page.get_by_role('link', name='批量发布', exact=True).click()
+            expect(page.get_by_role('heading', name='确认后直接发布')).to_be_visible()
+            expect(page.locator('#module .step')).to_have_count(3)
+            expect(page.get_by_role('button', name='确认发布', exact=True)).to_be_visible()
+            # 逐表断言，不写“总行数”：多一张表就失效，已经因此白摔两次。
+            expect(page.locator('[name="pick-platform"]')).to_have_count(10)                      # 选择平台
+            expect(page.locator('#login-rows tr')).to_have_count(7)                                # 登录状态表
+            page.screenshot(path=str(OUT / 'live-publication.png'), full_page=True)
+            page.locator('#module details summary').click()
+            expect(page.locator('#module details table')).to_be_visible()
+            expect(page.locator('#module details tbody tr')).to_have_count(10)                     # 平台接入与凭据
+            expect(page.get_by_text('公众号草稿箱', exact=False).first).to_be_visible()
+            checks.append('direct publish flow plus all 10 platform interfaces')
+
+            expect(page.get_by_role('heading', name='平台登录状态')).to_be_visible()
+            expect(page.get_by_role('button', name='打开登录窗口', exact=True)).to_be_visible()
+            expect(page.get_by_role('button', name='重新检测', exact=True)).to_be_visible()
+            checks.append('platform login panel present')
+
             page.get_by_role('link', name='模型与平台', exact=True).click()
             expect(page.get_by_role('heading', name='模型与平台')).to_be_visible()
             expect(page.get_by_text('DeepSeek').first).to_be_visible()

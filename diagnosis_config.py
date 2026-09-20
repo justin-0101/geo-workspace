@@ -1,16 +1,16 @@
 """Validated diagnostic configuration, separate from publishing destinations."""
 from urllib.parse import urlparse
 
+import publish_adapters
+
 DIAGNOSIS_PLATFORMS = [
     dict(id='deepseek', label='DeepSeek', entry_url='https://chat.deepseek.com/', required_mode='默认对话', login_required=True),
     dict(id='doubao', label='豆包', entry_url='https://www.doubao.com/chat/', required_mode='默认助手', login_required=True),
     dict(id='qianwen', label='千问', entry_url='https://www.qianwen.com/', required_mode='默认助手', login_required=True),
     dict(id='metaso', label='秘塔', entry_url='https://metaso.cn/', required_mode='默认联网搜索', login_required=True),
 ]
-PUBLISH_PLATFORMS = [dict(id=k, label=v) for k, v in [
-    ('wechat_mp','微信公众号'), ('zhihu','知乎'), ('baijia','百家号'), ('toutiao','今日头条'),
-    ('csdn','CSDN'), ('xiaohongshu','小红书'), ('official_site','官网'), ('sohu','搜狐号'),
-    ('dayu','大鱼号'), ('baike','百度百科')]]
+# 发布平台的唯一来源：publish_adapters 为每个平台预留了接入接口契约。
+PUBLISH_PLATFORMS = [dict(id=spec.id, label=spec.label) for spec in publish_adapters.PLATFORM_SPECS]
 
 
 def suggest_questions(profile):

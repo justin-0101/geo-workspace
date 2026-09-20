@@ -106,5 +106,16 @@ pre{white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.7}
 .qgroup span{font-size:11px;color:#98a5ab}
 .bars .bar-row:first-child{padding-top:0}
 @media(max-width:1180px){.ov-2{grid-template-columns:1fr}.hero-grid{grid-template-columns:repeat(2,1fr)}.summary{grid-template-columns:1fr}.summary-meta{border-left:0;padding-left:0;border-top:1px solid #edf0f1;padding-top:12px}}
+/* 批量发布：三步流程指示 */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:18px 21px 20px}
+.step{padding:14px;border:1px solid #e5e9eb;border-radius:8px;background:#fafbfb}
+.step.done{border-color:#bfe0cd;background:#f2faf5}
+.step.current{border-color:#9fd0dd;background:#eef7fa}
+.step strong{display:block;font-size:13px;margin-bottom:6px}
+.step span{font-size:12px;color:#71808a;line-height:1.6;display:block}
+.step em{font-style:normal;display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:#e7f3f6;color:#176b88;font-size:11px;font-weight:700;margin-right:7px}
+.step.done em{background:#d8efe2;color:#2b8a62}
+.step.current em{background:#176b88;color:#fff}
+@media(max-width:900px){.steps{grid-template-columns:1fr}}
 
 :focus-visible{outline:2px solid #176b88;outline-offset:3px}

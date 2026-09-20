@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 from test_workflow_api import APITests
 from diagnosis_config import suggest_questions
 from diagnosis_runs import verify_frozen_run
@@ -63,27 +64,154 @@ class EditorialTests(APITests):
         self.assertFalse(e['generated'])
         self.assertIsNone(e['latest'])
 
-    def test_review_and_publication_gate(self):
+    def test_content_can_be_created_without_diagnosis(self):
+        import publish_adapters as adapters
+        slug=self.create('无诊断项目'); base='/api/projects/'+slug
+        r=self.client.post(base+'/content',json={'title':'设备资产管理系统选型指南','brief':'常见问题\n选型指标','channel':'公众号长文'})
+        self.assertEqual(r.status_code,201); aid=r.json()['id']
+        items=self.client.get(base+'/editorial/content').json()['items']
+        self.assertEqual(len(items),1)
+        self.assertEqual(items[0]['source'],'manual')
+        self.assertIsNone(items[0]['action_id'])
+        self.assertIn('## 常见问题',items[0]['body'])
+        self.assertIn('（待补充',items[0]['body'])
+        # 占位符未补齐不能过审
+        r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':1,'confirm':True})
+        self.assertEqual(r.status_code,409); self.assertIn('待补充',r.json()['detail'])
+        # 补齐正文与事实后可过审、可发布
+        self.assertEqual(self.client.put(base+'/content/'+aid,json={'title':'设备资产管理系统选型指南','body':'正文（已核对）','facts':'官网 https://www.example.com','revision':1}).status_code,200)
+        self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True}).status_code,200)
+        with patch.object(adapters.PublishAdapter,'submit_browser',
+                          lambda self,a,evidence_dir=None: adapters.PublishResult('submitted','已提交（测试）')):
+            out=self.client.post(base+'/publish',json={'asset_ids':[aid],'platforms':['zhihu'],'confirm':True})
+        self.assertEqual(out.status_code,200)
+        self.assertEqual(out.json()['results'][0]['status'],'submitted')
+
+    def test_migration_keeps_existing_assets(self):
         slug,base,aid=self.seed()
-        publish=dict(asset_ids=[aid],platforms=['zhihu'],operator='测试操作人',confirm=True)
-        self.assertEqual(self.client.post(base+'/publishing',json=publish).status_code,409)
-        save=dict(title='测试标题',body='测试正文',facts='测试事实依据',revision=1)
-        self.assertEqual(self.client.put(base+'/content/'+aid,json=save).status_code,200)
-        review=dict(reviewer='测试审核人',revision=2,confirm=True)
-        self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json=review).status_code,200)
-        r=self.client.post(base+'/publishing',json=publish);self.assertEqual(r.status_code,200)
-        identity=r.json()['created'][0]
-        self.assertEqual(self.client.post(base+'/publishing',json=publish).json()['created'],[])
-        self.assertEqual(self.client.get(base+'/editorial/publications').json()['items'][0]['status'],'manual_required')
-        save.update(body='已修改正文',revision=2)
-        self.client.put(base+'/content/'+aid,json=save)
-        self.assertEqual(self.client.post(base+'/publishing',json=publish).status_code,409)
-        jobs=self.client.get(base+'/editorial/publications').json()['items']
-        self.assertEqual(jobs[0]['body_snapshot'],'测试正文')
-        other=self.create('另一项目')
-        self.assertEqual(self.client.post('/api/projects/'+other+'/publishing/'+identity+'/receipt',json=dict(url='https://example.com/test',operator='测试',confirm=True)).status_code,404)
-        self.assertEqual(self.client.post(base+'/publishing/'+identity+'/receipt',json=dict(url='javascript:bad',operator='测试',confirm=True)).status_code,409)
-        r=self.client.post(base+'/publishing/'+identity+'/receipt',json=dict(url='https://example.com/test',operator='测试',confirm=True))
+        store.migrate()
+        items=self.client.get(base+'/editorial/content').json()['items']
+        self.assertEqual([x['id'] for x in items],[aid])
+        self.assertEqual(items[0]['source'],'diagnosis')
+
+    def _approved(self, base, aid):
+        self.client.put(base+'/content/'+aid,json={'title':'测试内容','body':'正文（已核对）','facts':'来源 https://example.com','revision':1})
+        self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True})
+        return aid
+
+    def test_platform_adapter_registry_covers_all_platforms(self):
+        import publish_adapters as adapters
+        caps=adapters.capabilities()
+        self.assertEqual(len(caps),10)
+        modes={c['id']:c['mode'] for c in caps}
+        self.assertEqual(modes['wechat_mp'],'api')
+        self.assertEqual(modes['baike'],'manual')
+        self.assertEqual(modes['official_site'],'manual')
+        for pid in ['zhihu','baijia','toutiao','csdn','xiaohongshu','sohu','dayu']:
+            self.assertEqual(modes[pid],'browser')
+
+    def test_publish_requires_confirmation(self):
+        slug,base,aid=self.seed(); self._approved(base,aid)
+        r=self.client.post(base+'/publish',json={'asset_ids':[aid],'platforms':['zhihu'],'confirm':False})
+        self.assertEqual(r.status_code,409)
+        self.assertIn('请确认发布',r.json()['detail'])
+
+    def test_publish_blocks_unapproved_and_missing_elements(self):
+        import publish_adapters as adapters
+        slug,base,aid=self.seed()
+        self.assertEqual(self.client.post(base+'/publish',json={'asset_ids':[aid],'platforms':['zhihu'],'confirm':True}).status_code,409)
+        self._approved(base,aid)
+        with patch.object(adapters.PublishAdapter,'submit_browser',
+                          side_effect=AssertionError('缺要素时不应调用浏览器')):
+            r=self.client.post(base+'/publish',json={'asset_ids':[aid],'platforms':['xiaohongshu'],'confirm':True})
         self.assertEqual(r.status_code,200)
+        out=r.json()['results'][0]
+        self.assertEqual(out['status'],'manual_required')
+        self.assertIn('封面图',out['message'])
+
+    def test_publish_runs_adapters_and_records_audit(self):
+        import publish_adapters as adapters
+        slug,base,aid=self.seed(); self._approved(base,aid)
+        calls=[]
+        def fake_browser(self,asset,evidence_dir=None):
+            calls.append(self.spec.id)
+            return adapters.PublishResult('submitted','浏览器自动化已提交（测试）',evidence='fake.png')
+        with patch.object(adapters.PublishAdapter,'submit_browser',fake_browser):
+            r=self.client.post(base+'/publish',json={'asset_ids':[aid],'platforms':['wechat_mp','zhihu','baike'],'confirm':True})
+        self.assertEqual(r.status_code,200)
+        got={x['platform']:x for x in r.json()['results']}
+        self.assertEqual(got['zhihu']['status'],'submitted')
+        self.assertEqual(calls,['zhihu'])
+        # 公众号未配置凭据 → 明确转人工，不伪造成已写入草稿箱
+        self.assertEqual(got['wechat_mp']['status'],'manual_required')
+        self.assertIn('未配置',got['wechat_mp']['message'])
+        self.assertEqual(got['baike']['status'],'manual_required')
+        jobs={j['platform']:j for j in self.client.get(base+'/editorial/publications').json()['items']}
+        self.assertEqual(jobs['zhihu']['status'],'submitted')
+        self.assertEqual(jobs['zhihu']['mode'],'browser')
+        self.assertEqual(jobs['wechat_mp']['status'],'manual_required')
+
+    def test_platform_credentials_stored_masked(self):
+        r=self.client.put('/api/platforms/wechat_mp/credentials',json={'appid':'wx1234567890','secret':'super-secret-value'})
+        self.assertEqual(r.status_code,200)
+        self.assertNotIn('super-secret-value',json.dumps(r.json(),ensure_ascii=False))
+        caps={p['id']:p for p in self.client.get('/api/platforms').json()['publication']}
+        creds={c['name']:c for c in caps['wechat_mp']['credentials']}
+        self.assertTrue(creds['appid']['configured'] and creds['secret']['configured'])
+        self.assertTrue(caps['wechat_mp']['can_attempt'])
+        self.assertNotIn('super-secret-value',json.dumps(caps,ensure_ascii=False))
+        # 空值表示保持原值不变
+        self.client.put('/api/platforms/wechat_mp/credentials',json={'appid':'','secret':''})
+        caps2={p['id']:p for p in self.client.get('/api/platforms').json()['publication']}
+        creds={c['name']:c for c in caps2['wechat_mp']['credentials']}
+        self.assertTrue(all(c['configured'] for c in creds.values()))
+
+    def test_wechat_draft_uses_official_api(self):
+        import wechat_mp
+        from unittest.mock import MagicMock
+        client=MagicMock()
+        client.get.return_value=MagicMock(json=lambda:{'access_token':'tok','expires_in':7200})
+        client.post.return_value=MagicMock(json=lambda:{'media_id':'MEDIA123'})
+        api=wechat_mp.WechatMpClient('wxappid','secret',client=client)
+        out=api.add_draft(title='标题',content='## 小节\n正文')
+        self.assertEqual(out['media_id'],'MEDIA123')
+        args,kwargs=client.post.call_args
+        self.assertIn('/cgi-bin/draft/add',args[0])
+        self.assertIn('access_token',kwargs['params'])
+        payload=json.loads(kwargs['content'].decode('utf8'))
+        self.assertEqual(payload['articles'][0]['title'],'标题')
+        self.assertIn('<h2>小节</h2>',payload['articles'][0]['content'])
+
+    def test_wechat_errors_are_actionable_and_secret_free(self):
+        import wechat_mp
+        from unittest.mock import MagicMock
+        client=MagicMock()
+        client.get.return_value=MagicMock(json=lambda:{'access_token':'tok','expires_in':7200})
+        client.post.return_value=MagicMock(json=lambda:{'errcode':40164,'errmsg':'invalid ip'})
+        api=wechat_mp.WechatMpClient('wxappid','topsecret',client=client)
+        with self.assertRaises(wechat_mp.WechatError) as ctx:
+            api.add_draft(title='标题',content='正文')
+        message=str(ctx.exception)
+        self.assertIn('IP 白名单',message)
+        self.assertNotIn('topsecret',message)
+
+    def test_manual_receipt_still_available(self):
+        slug,base,aid=self.seed(); self._approved(base,aid)
+        r=self.client.post(base+'/publish',json={'asset_ids':[aid],'platforms':['baike'],'confirm':True})
+        self.assertEqual(r.status_code,200)
+        job=self.client.get(base+'/editorial/publications').json()['items'][0]
+        self.assertEqual(job['status'],'manual_required')
+        self.assertEqual(self.client.post(base+'/publishing/'+job['id']+'/receipt',json={'url':'javascript:bad','operator':'测试','confirm':True}).status_code,409)
+        self.assertEqual(self.client.post(base+'/publishing/'+job['id']+'/receipt',json={'url':'https://example.com/x','operator':'测试','confirm':True}).status_code,200)
+        self.assertEqual(self.client.get(base+'/editorial/publications').json()['items'][0]['status'],'published_manual')
+
+    def test_review_gate_blocks_empty_and_placeholder(self):
+        slug,base,aid=self.seed()
+        self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':1,'confirm':True}).status_code,409)
+        self.client.put(base+'/content/'+aid,json={'title':'t','body':'正文（待补充：事实）','facts':'来源','revision':1})
+        r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True})
+        self.assertEqual(r.status_code,409)
+        self.assertIn('待补充',r.json()['detail'])
+
 
 if __name__=='__main__':unittest.main()

@@ -3,6 +3,7 @@ import json
 import uuid
 from urllib.parse import urlparse
 import workspace_store as store
+import publish_adapters as adapters
 from diagnosis_runs import verify_frozen_run
 from browser_engine import rows
 from diagnosis_config import PUBLISH_PLATFORMS
@@ -37,6 +38,39 @@ def derive(slug, run_id):
     return {'created':count}
 
 
+def build_outline(title, brief):
+    """Mechanical scaffold only: headings from the user's own points, no invented facts."""
+    import re as _re
+    points = [p.strip() for p in _re.split(r'[\n;；]+', brief or '') if p.strip()]
+    if not points:
+        points = ['这篇内容要回答的问题']
+    lines = [f'# {title}', '']
+    for point in points:
+        lines += [f'## {point}', '', '（待补充：写清可核查的事实、数据或案例，不要只写形容词。）', '']
+    lines += ['## 事实与来源', '', '（待补充：逐条列出可公开核验的事实与出处。）']
+    return '\n'.join(lines)
+
+
+def create_manual_asset(slug, title, brief='', channel=''):
+    """Create a content draft that does not depend on any diagnosis batch."""
+    title = (title or '').strip()
+    if not title:
+        raise ValueError('请填写内容标题')
+    with store.connection() as c:
+        c.execute('BEGIN IMMEDIATE')
+        if not c.execute('SELECT 1 FROM projects WHERE slug=?', (slug,)).fetchone():
+            raise KeyError('项目不存在')
+        identity = uuid.uuid4().hex
+        timestamp = store.now()
+        note = f'直接创建内容（{channel.strip()}）' if channel.strip() else '直接创建内容'
+        c.execute('''INSERT INTO editorial_assets
+                     (id,project_slug,action_id,source,brief,title,body,created_at,updated_at)
+                     VALUES(?,?,NULL,'manual',?,?,?,?,?)''',
+                  (identity, slug, (brief or '').strip(), title, build_outline(title, brief), timestamp, timestamp))
+        store.record_event(c, slug, 'content_created', note)
+    return {'id': identity, 'source': 'manual'}
+
+
 def create_asset(slug,action_id):
     with store.connection() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -69,33 +103,55 @@ def review_asset(slug,identity,revision,reviewer,confirmed):
         c.execute('BEGIN IMMEDIATE')
         old=require(c,'editorial_assets',slug,identity)
         if revision!=old['revision']: raise ValueError('内容已更新，请重新审核当前版本')
+        if '（待补充' in old['body']: raise ValueError('正文还有未填写的“待补充”段落，请先补齐')
         if not old['body'].strip() or not old['facts'].strip(): raise ValueError('请先填写正文及可核查的事实依据')
         c.execute("UPDATE editorial_assets SET status='approved',reviewed_revision=revision,reviewer=?,updated_at=? WHERE id=?",(reviewer.strip(),store.now(),identity))
         store.record_event(c,slug,'content_approved','当前内容版本审核通过')
     return {'message':'审核通过'}
 
 
-def publish_batch(slug,asset_ids,platforms,confirmed,operator):
-    if confirmed is not True: raise ValueError('请确认人工发布安排')
-    if not operator.strip(): raise ValueError('请填写发布负责人')
+def publish_now(slug,asset_ids,platforms,confirmed,operator=''):
+    """选定内容与平台后直接发布：公众号走官方 API 写草稿，其余走浏览器自动化。"""
+    if confirmed is not True: raise ValueError('请确认发布')
     allowed={p['id'] for p in PUBLISH_PLATFORMS}
-    if not asset_ids or not platforms or any(p not in allowed for p in platforms): raise ValueError('请选择内容和有效发布平台')
+    if not asset_ids: raise ValueError('请选择要发布的内容')
+    if not platforms: raise ValueError('请选择发布平台')
+    unknown=[p for p in platforms if p not in allowed]
+    if unknown: raise ValueError('不支持的平台：'+'、'.join(unknown))
     with store.connection() as c:
-        c.execute('BEGIN IMMEDIATE')
         assets=[require(c,'editorial_assets',slug,i) for i in set(asset_ids)]
-        for a in assets:
-            if a['status']!='approved' or a['reviewed_revision']!=a['revision']: raise ValueError('只能发布当前版本已审核的内容')
-        created=[]
-        for a in assets:
-            for platform in set(platforms):
-                existing=c.execute('SELECT id FROM publishing_jobs WHERE asset_id=? AND platform=? AND asset_revision=?',(a['id'],platform,a['revision'])).fetchone()
-                if existing: continue
-                identity=uuid.uuid4().hex;timestamp=store.now()
-                c.execute('INSERT INTO publishing_jobs(id,project_slug,asset_id,platform,asset_revision,title_snapshot,body_snapshot,operator,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
-                          (identity,slug,a['id'],platform,a['revision'],a['title'],a['body'],operator.strip(),timestamp,timestamp))
-                created.append(identity)
-        store.record_event(c,slug,'publishing_arranged',f'创建 {len(created)} 个待人工发布任务')
-    return {'created':created,'manual_gate':True}
+    for a in assets:
+        if a['status']!='approved' or a['reviewed_revision']!=a['revision']:
+            raise ValueError('只能发布当前版本已审核的内容')
+    evidence_dir=store.DATA/'publish'/store.now().replace(':','-').replace('+','_')
+    results=[]
+    for a in assets:
+        for platform in platforms:
+            plan=adapters.describe(a,platform)
+            if plan['missing']:
+                result=adapters.PublishResult('manual_required',plan['action'])
+            else:
+                result=adapters.get_adapter(platform).publish(a,None,evidence_dir)
+            results.append({'asset_id':a['id'],'asset_title':a['title'],'platform':platform,
+                            'platform_label':plan['label'],'mode':plan['mode'],
+                            'mode_label':plan['mode_label'],'status':result.status,
+                            'message':result.message,'url':result.published_url,
+                            'evidence':result.evidence})
+            stamp=store.now()
+            with store.connection() as c:
+                c.execute('''INSERT INTO publishing_jobs
+                    (id,project_slug,asset_id,platform,asset_revision,title_snapshot,body_snapshot,
+                     status,receipt_url,operator,mode,adapter_note,created_at,updated_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(asset_id,platform,asset_revision) DO UPDATE SET
+                      status=excluded.status,receipt_url=excluded.receipt_url,operator=excluded.operator,
+                      mode=excluded.mode,adapter_note=excluded.adapter_note,updated_at=excluded.updated_at''',
+                    (uuid.uuid4().hex,slug,a['id'],platform,a['revision'],a['title'],a['body'],
+                     result.status,result.published_url,operator.strip(),plan['mode'],
+                     result.message,stamp,stamp))
+                store.record_event(c,slug,'publish_'+result.status,
+                                   f"{plan['label']}：{result.message[:120]}")
+    return {'results':results}
 
 
 def receipt(slug,identity,url,operator,confirmed):

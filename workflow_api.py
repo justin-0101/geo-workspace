@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 import workspace_store as store
 import browser_engine as engine
 import editorial_flow as editorial
+import publish_adapters as adapters
+import platform_login
 from diagnosis_config import DIAGNOSIS_PLATFORMS, PUBLISH_PLATFORMS, suggest_questions
 from diagnosis_runs import create_frozen_run, verify_frozen_run
 from process_guard import ProcessGuard
@@ -199,6 +201,12 @@ def file(slug: str,run_id: str,file_path: str):
     if path.relative_to(directory).parts[0] not in {'report','raw','evidence'}: raise KeyError('文件不存在')
     return FileResponse(path,filename=path.name)
 
+class ManualContentInput(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    brief: str = Field(default='', max_length=4000)
+    channel: str = Field(default='', max_length=60)
+
+
 class AssetInput(BaseModel):
     title: str
     body: str
@@ -231,6 +239,11 @@ def editorial_list(slug: str,kind: str):
 @app.post('/api/projects/{slug}/actions/{identity}/content')
 def asset_create(slug: str,identity: str): return editorial.create_asset(slug,identity)
 
+@app.post('/api/projects/{slug}/content', status_code=201)
+def asset_create_manual(slug: str, payload: ManualContentInput):
+    return editorial.create_manual_asset(slug, payload.title, payload.brief, payload.channel)
+
+
 @app.put('/api/projects/{slug}/content/{identity}')
 def asset_save(slug: str,identity: str,payload: AssetInput):
     return editorial.save_asset(slug,identity,payload.title,payload.body,payload.facts,payload.revision)
@@ -239,9 +252,81 @@ def asset_save(slug: str,identity: str,payload: AssetInput):
 def asset_review(slug: str,identity: str,payload: ReviewInput):
     return editorial.review_asset(slug,identity,payload.revision,payload.reviewer,payload.confirm)
 
-@app.post('/api/projects/{slug}/publishing')
-def arrange_publication(slug: str,payload: PublishInput):
-    return editorial.publish_batch(slug,payload.asset_ids,payload.platforms,payload.confirm,payload.operator)
+@app.get('/api/projects/{slug}/publishing/capabilities')
+def publishing_capabilities(slug: str, asset_id: str = ''):
+    """每个平台预留接口的当前状态；给出 asset_id 时一并计算缺失的内容要素。"""
+    store.get_profile(slug)
+    asset = None
+    if asset_id:
+        with store.connection() as c:
+            row = c.execute('SELECT * FROM editorial_assets WHERE id=? AND project_slug=?',
+                            (asset_id, slug)).fetchone()
+            if not row: raise KeyError('内容不存在')
+            asset = dict(row)
+    items = [adapters.describe(asset, adapter.spec.id) if asset else adapter.capability()
+             for adapter in adapters.REGISTRY.values()]
+    return {'asset_id': asset_id or None, 'platforms': items}
+
+
+@app.post('/api/projects/{slug}/publish')
+def publish_assets(slug: str, payload: PublishInput):
+    return editorial.publish_now(slug, payload.asset_ids, payload.platforms, payload.confirm, payload.operator)
+
+
+class CredentialsInput(BaseModel):
+    appid: str = Field(default='', max_length=200)
+    secret: str = Field(default='', max_length=400)
+
+
+@app.put('/api/platforms/{platform_id}/credentials')
+def save_platform_credentials(platform_id: str, payload: CredentialsInput):
+    adapter = adapters.get_adapter(platform_id)
+    import platform_credentials
+    platform_credentials.set_values(platform_id, payload.model_dump())
+    return {'message': '凭据已保存到本机数据库；接口不会回显明文',
+            'credentials': adapter.capability()['credentials']}
+
+
+@app.post('/api/platforms/{platform_id}/credentials/check')
+def check_platform_credentials(platform_id: str):
+    adapter = adapters.get_adapter(platform_id)
+    if adapter.spec.mode != 'api':
+        raise ValueError('该平台没有可测试的 API 凭据')
+    health = adapter.health()
+    if not health.get('ready'):
+        raise ValueError(health.get('reason', '凭据未配置'))
+    import platform_credentials, wechat_mp
+    client = wechat_mp.WechatMpClient(platform_credentials.get(platform_id, 'appid'),
+                                      platform_credentials.get(platform_id, 'secret'))
+    try:
+        return client.check()
+    except Exception as exc:
+        raise ValueError(f'凭据校验失败：{str(exc)[:200]}')
+
+
+class LoginInput(BaseModel):
+    platforms: list[str] = []
+
+
+@app.post('/api/platforms/login')
+def open_platform_login(payload: LoginInput):
+    # 打开登录窗口并在后台轮询识别登录态；已有窗口在开时直接返回当前会话。
+    # 返回完整的登录态快照，前端可以直接重绘而不用再发一次 GET。
+    started = platform_login.start(payload.platforms or None)
+    return {**platform_login.snapshot(),
+            'started': started.get('started'), 'message': started.get('message')}
+
+
+@app.get('/api/platforms/login-state')
+def platform_login_state():
+    return platform_login.snapshot()
+
+
+@app.post('/api/platforms/login-state/probe')
+def probe_platform_login(payload: LoginInput):
+    # 无头重新检测（窗口没开时用）：持锁占用时抛 409，不硬抢 profile。
+    result = platform_login.probe(payload.platforms or None)
+    return {**platform_login.snapshot(), 'probe': result}
 
 @app.post('/api/projects/{slug}/publishing/{identity}/receipt')
 def publication_receipt(slug: str,identity: str,payload: ReceiptInput):
@@ -285,7 +370,7 @@ def text_file(slug: str,run_id: str,file_path: str):
     return {'text':path.read_text(encoding='utf-8-sig')}
 
 @app.get('/api/platforms')
-def platforms(): return {'diagnosis':DIAGNOSIS_PLATFORMS,'publication':PUBLISH_PLATFORMS}
+def platforms(): return {'diagnosis':DIAGNOSIS_PLATFORMS,'publication':adapters.capabilities()}
 
 @app.get('/api/workbench')
 def workbench():
