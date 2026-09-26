@@ -29,10 +29,24 @@ def main():
             page.set_default_timeout(20000)
             page.on('pageerror', lambda e: errors.append(str(e)))
             page.goto('http://127.0.0.1:4173/', wait_until='domcontentloaded')
+
+            def expect_page_lead(title, subtitle):
+                expect(page.locator('.page-lead')).to_be_visible()
+                expect(page.locator('.page-lead h1')).to_have_text(title)
+                expect(page.locator('.page-lead p').first).to_have_text(subtitle)
+                breadcrumb = page.locator('#breadcrumb')
+                expect(breadcrumb.get_by_text('工作空间', exact=True)).to_be_visible()
+                expect(breadcrumb).to_have_css('font-size', '13px')
+                typography = breadcrumb.locator('a, [aria-current]').evaluate_all(
+                    "els => els.map(e => { const s=getComputedStyle(e); return [s.fontFamily,s.fontSize,s.lineHeight,s.padding] })")
+                assert len({tuple(x) for x in typography}) == 1, typography
+
             expect(page.get_by_role('link', name='工作台', exact=True)).to_be_visible()
-            checks.append('workbench loads from live entry')
+            expect_page_lead('工作台', '集中查看待处理事项和最近活动。')
+            checks.append('workbench loads with unified page lead')
 
             page.get_by_role('link', name='诊断项目', exact=True).click()
+            expect_page_lead('诊断项目', '创建并管理 GEO 诊断项目。')
             if not projects:
                 expect(page.get_by_text('还没有项目')).to_be_visible()
                 checks.append('empty project list state')
@@ -46,6 +60,7 @@ def main():
                 checks.append('project list and search')
 
                 page.get_by_role('link', name=name, exact=True).click()
+                expect_page_lead(name, '查看主体资料、诊断配置、执行过程与结果。')
                 expect(page.get_by_role('link', name='概览', exact=True)).to_be_visible()
                 overview = api('/api/projects/' + projects[0]['slug'] + '/overview')
                 if overview.get('generated'):
@@ -74,34 +89,81 @@ def main():
                 expect(page.locator('#project-view')).to_be_visible()
                 checks.append('run view reachable')
 
+            page.get_by_role('link', name='改善任务', exact=True).click()
+            expect_page_lead('改善任务', '把诊断结论转成可执行的改善任务。')
+            expect(page.locator('#scope')).to_be_visible()
+
             page.get_by_role('link', name='内容生产', exact=True).click()
+            expect_page_lead('内容生产', '从改善任务生成、编辑并审核发布内容。')
             expect(page.get_by_role('button', name='＋ 直接生成内容', exact=True)).to_be_visible()
             page.screenshot(path=str(OUT / 'live-content.png'), full_page=True)
-            checks.append('direct content entry available without diagnosis')
+            checks.append('actions and content use the unified page lead')
 
             page.get_by_role('link', name='批量发布', exact=True).click()
-            expect(page.get_by_role('heading', name='确认后直接发布')).to_be_visible()
-            expect(page.locator('#module .step')).to_have_count(3)
-            expect(page.get_by_role('button', name='确认发布', exact=True)).to_be_visible()
-            # 逐表断言，不写“总行数”：多一张表就失效，已经因此白摔两次。
-            expect(page.locator('[name="pick-platform"]')).to_have_count(10)                      # 选择平台
-            expect(page.locator('#login-rows tr')).to_have_count(7)                                # 登录状态表
-            page.screenshot(path=str(OUT / 'live-publication.png'), full_page=True)
+            expect_page_lead('批量发布', '把已审核的内容一次投到多个平台。')
+            # 逐项断言，不写「总行数」：多一张表就失效，已经因此白摔两次。
+            # 数量一律跟 API 对齐，不写死数字，数据一变就红才是门禁该有的样子。
+            caps = api('/api/platforms')['publication']
+            login = api('/api/platforms/login-state')
+            assets = api('/api/projects/' + projects[0]['slug'] + '/editorial/content')['items']
+            approved = [a for a in assets if a['status'] == 'approved']
+
+            expect(page.get_by_role('heading', name='批量发布', exact=True)).to_be_visible()
+            expect(page.locator('.gate')).to_be_visible()
+            expect(page.locator('.gate-facts li')).to_have_count(4)                 # 准入条四个数字
+            expect(page.locator('#tabs a')).to_have_count(2)                        # 准备发布 / 发布记录
+            expect(page.locator('#tabs a[aria-current]')).to_have_count(1)          # 只有一个当前页签
+            checks.append('batch publish gate plus two tabs')
+
+            expect(page.locator('[name="pick-platform"]')).to_have_count(len(caps))  # 平台芯片
+            expect(page.locator('[name="pick-asset"]')).to_have_count(len(approved)) # 内容只列已审核的
+            expect(page.locator('#submitbar')).to_be_visible()
+            expect(page.get_by_role('button', name='发布', exact=True)).to_be_disabled()  # 没选时不可点
+            checks.append('publish picks reflect api counts')
+
             page.locator('#module details summary').click()
             expect(page.locator('#module details table')).to_be_visible()
-            expect(page.locator('#module details tbody tr')).to_have_count(10)                     # 平台接入与凭据
-            expect(page.get_by_text('公众号草稿箱', exact=False).first).to_be_visible()
-            checks.append('direct publish flow plus all 10 platform interfaces')
+            expect(page.locator('#login-rows tr')).to_have_count(len(caps))          # 平台明细：一行一个平台
+            wechat_row = page.locator('#login-rows tr').filter(has_text='微信公众号')
+            expect(wechat_row).to_have_count(1)
+            expect(wechat_row).to_contain_text('待配凭据')
+            checks.append('platform detail table covers every interface')
 
-            expect(page.get_by_role('heading', name='平台登录状态')).to_be_visible()
             expect(page.get_by_role('button', name='打开登录窗口', exact=True)).to_be_visible()
             expect(page.get_by_role('button', name='重新检测', exact=True)).to_be_visible()
-            checks.append('platform login panel present')
+
+            # 选中之后：提交条要给条数，按钮要能点，文案要说出数量
+            if approved:
+                page.locator('[name="pick-asset"]').first.check()
+            page.locator('[name="pick-platform"]').first.check()
+            page.wait_for_timeout(300)
+            if approved:
+                expect(page.locator('.submit-facts')).to_contain_text('条发布')
+                expect(page.locator('#submitbar button')).to_be_enabled()
+                expect(page.locator('#submitbar button')).to_contain_text('发布 ')
+                page.locator('#submitbar button').click()
+                expect(page.locator('#modal-title')).to_contain_text('发布')
+                expect(page.locator('#modal-body tbody tr')).not_to_have_count(0)
+                page.locator('#cancel-modal').click()
+            page.screenshot(path=str(OUT / 'live-publication.png'), full_page=True)
+            checks.append('selection drives the submit bar and the confirm dialog')
+
+            page.locator('#tabs a').filter(has_text='发布记录').click()
+            expect(page.locator('#tabs a[aria-current]')).to_contain_text('发布记录')
+            checks.append('history tab reachable')
+
+            page.get_by_role('link', name='报告中心', exact=True).click()
+            expect_page_lead('报告中心', '查看诊断报告、数据质量和原始数据。')
+            expect(page.locator('#scope')).to_be_visible()
 
             page.get_by_role('link', name='模型与平台', exact=True).click()
-            expect(page.get_by_role('heading', name='模型与平台')).to_be_visible()
+            expect_page_lead('模型与平台', '查看诊断模型与发布平台的接入方式。')
             expect(page.get_by_text('DeepSeek').first).to_be_visible()
-            checks.append('platform list reachable')
+
+            page.get_by_role('link', name='设置', exact=True).click()
+            expect_page_lead('设置', '设置工作空间名称和默认操作人。')
+            expect(page.locator('#settings-form')).to_be_visible()
+            checks.append('reports, platforms and settings use the unified page lead')
             assert not errors, errors
         finally:
             browser.close()

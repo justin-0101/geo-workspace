@@ -16,6 +16,9 @@ ROUTES={'index.html':'workbench','dashboard.html':'workbench','projects.html':'p
 #: 不带时浏览器会沿用原 fragment；完全没带时前端自己落到工作台。
 ENTRY_ROUTES={'index.html','dashboard.html'}
 PUBLIC={'workspace.html','workspace.css','workspace.js'}
+#: 自托管字体目录。OFL-1.1 许可的公开字体文件，可随仓库分发；
+#: 按前缀放行，免得每加一个字重就改一次白名单。
+PUBLIC_PREFIX=('fonts/',)
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self,*args,**kwargs):super().__init__(*args,directory=str(ROOT),**kwargs)
@@ -28,11 +31,11 @@ class Handler(SimpleHTTPRequestHandler):
             frag='' if name in ENTRY_ROUTES else '#'+ROUTES[name]
             target='/workspace.html'+frag+('?' + urlencode(args) if args else '')
             self.send_response(302);self.send_header('Location',target);self.send_header('Cache-Control','no-store');self.end_headers();return
-        if name not in PUBLIC:self.send_error(404);return
+        if not (name in PUBLIC or name.startswith(PUBLIC_PREFIX)):self.send_error(404);return
         super().do_GET()
     def do_HEAD(self):
         name=urlsplit(self.path).path.lstrip('/')
-        if name not in PUBLIC:self.send_error(404);return
+        if not (name in PUBLIC or name.startswith(PUBLIC_PREFIX)):self.send_error(404);return
         super().do_HEAD()
     def end_headers(self):
         self.send_header('Cache-Control','no-store')

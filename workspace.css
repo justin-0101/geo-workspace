@@ -16,6 +16,23 @@
 --notice-ink:#975325;--notice-bg:#fff1e8;--notice-line:#f0d5c3;
 /* 侧栏保持深色；指示条用主色浅阶，纯主色在深底上只有 2.73:1 不达标 */
 --navy:#14212b;--side-ink:#d7e0e5;--side-muted:#b8c7cf;--side-accent:#5fb0cc;--side-hover:#1d303b;--side-active:#233944;--side-line:#2b3c47}
+/* ---- 自托管字体：拉丁与中文各一个文件，OFL-1.1，不联网、不依赖 CDN ----
+   为什么不把 system-ui 留在第一位：在中文 Windows 上 Chrome 把它解析成 Microsoft YaHei UI，
+   而雅黑自带拉丁字形，会把后面所有字体全部吞掉（CDP 实测整页 100% 走雅黑）。
+   代价是拉丁与数字用雅黑附带的字形，比例呆板、数字等宽性差，
+   而界面里到处是 0/10、30 条、AppID/AppSecret、v3、09-26。 */
+@font-face{font-family:"Geist";font-style:normal;font-weight:100 900;font-display:swap;
+  src:url("fonts/geist-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Geist";font-style:normal;font-weight:100 900;font-display:swap;
+  src:url("fonts/geist-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+/* 中文：local() 优先。本机已装完整思源黑体（16.95MB / 30890 字形），命中就不下 907KB 子集。 */
+@font-face{font-family:"Noto Sans SC Web";font-style:normal;font-weight:100 900;font-display:swap;
+  src:local("Noto Sans SC"),local("Source Han Sans SC"),local("思源黑体"),
+      url("fonts/noto-sans-sc-subset.woff2") format("woff2-variations")}
+/* 能写拉丁的都排前面，中文字体排后面：浏览器逐字符回退，拉丁走 Geist、中文落到思源黑体。 */
+:root{font-family:"Geist","Segoe UI",-apple-system,BlinkMacSystemFont,"Noto Sans SC Web","Noto Sans SC","Microsoft YaHei","PingFang SC","Hiragino Sans GB","Noto Sans CJK SC",Roboto,Helvetica,Arial,sans-serif}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink)}a{color:var(--blue);text-decoration:none}button,input,textarea,select{font:inherit}
 button,.button{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);padding:9px 15px;font-weight:700;cursor:pointer;display:inline-block}
 button:hover,.button:hover{background:var(--blue2)}button:disabled{opacity:.5;cursor:not-allowed}
@@ -125,7 +142,7 @@ pre{white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size
 .rail-block{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;color:var(--ink)}
 .rail-block .eyebrow{margin:0 0 9px}
 .rail-actions{display:grid;gap:8px}
-.rail-actions .button,.rail-actions button{display:block;width:100%;text-align:center}
+.rail-actions .button,.rail-actions button{display:flex;align-items:center;justify-content:center;width:100%;text-align:center}
 .rail-rows{display:grid;gap:7px}
 .rail-row{display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:12px}
 .rail-row span{color:var(--muted)}
@@ -180,3 +197,522 @@ pre{white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}html{scroll-behavior:auto!important}}
 
 :focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+
+/* =============================================================================
+   以下是组件层（原 proto-components.css），整段追加，覆盖上面的旧写法。
+   来源是逐轮对照参考站实测出来的：间距/圆角/描边/层次四套 token、
+   控件四态、表格表头权重、卡片阴影、滑动页签指示条、双边缘高光、毛玻璃。
+   旧写法留在上面没有删，是为了万一要回退时能一眼看出被覆盖了什么。
+   ============================================================================= */
+/* ============================ 一、Token 层 ============================ */
+:root{
+  /* 间距：4px 基数，所有页面共用 */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;
+  --sp-5:20px;--sp-6:24px;--sp-7:32px;--sp-8:40px;
+
+  /* 圆角按组件角色命名 */
+  --r-field:8px;--r-box:12px;--r-selector:6px;--r-pill:99px;
+
+  /* 描边、层次与状态 */
+  --line-strong:#c9cfd3;--line-hover:#6b747c;--line-invalid:#bf4444;
+  --elev-1:0 1px 3px rgba(20,33,43,.10),0 1px 2px rgba(20,33,43,.05);
+  --elev-2:0 6px 16px -6px rgba(20,33,43,.18),0 1px 3px rgba(20,33,43,.08);
+  --elev-3:0 24px 48px -18px rgba(20,33,43,.30),0 2px 6px rgba(20,33,43,.08);
+  --focus-ring:0 0 0 3px;
+  --edge:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(20,33,43,.05);
+  --edge-seat:inset 0 -1px 0 rgba(20,33,43,.04);
+  --glass-bg:rgba(251,251,250,.82);--glass-blur:saturate(1.3) blur(12px);
+
+  /* 动效：只做颜色和位置过渡 */
+  --ease-out:cubic-bezier(.16,1,.3,1);--ease-glide:cubic-bezier(.22,1,.36,1);
+  --t-fast:.14s;--t-base:.28s;
+
+  /* 控件与文字档位 */
+  --h-ctl:38px;--h-ctl-sm:32px;--size-check:16px;
+  --fs-page:30px;--fs-metric:22px;--fs-lg:18px;--fs-section:17px;
+  --fs-card:15px;--fs-body:14px;--fs-note:13px;--fs-meta:12px;--fs-eyebrow:10px;
+}
+
+/* ============================ 二、基础 ============================ */
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);line-height:1.6}
+h1,h2,h3,h4{line-height:1.35}
+h1{font-size:var(--fs-page);margin:0}
+h2{font-size:var(--fs-section);margin:0}
+h3{font-size:var(--fs-card);margin:0}
+p{line-height:1.62}
+a{color:var(--blue)}
+/* 眉标放在标题上方，是标签不是装饰，所以用 --muted 而不是 --faint */
+.eyebrow{font-size:var(--fs-eyebrow);letter-spacing:.08em;color:var(--muted);margin:0}
+.muted{color:var(--muted)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.dot{color:var(--faint)}
+
+/* 焦点环只给键盘。旧文件只有 1 处全局 outline，输入框靠浏览器默认蓝 */
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+:focus:not(:focus-visible){outline:none}
+
+/* 旧文件没有 ::placeholder / caret-color，占位符对比度不可控、光标是系统色 */
+::placeholder{color:var(--faint);opacity:1}
+input,textarea,select{caret-color:var(--blue)}
+::selection{background:var(--blue2);color:var(--blue-deep)}
+
+
+/* ============================ 三、表单控件 ============================ */
+/* 3.1 输入、下拉、文本域：统一高度、统一圆角、四态齐全 */
+input:not([type=checkbox]):not([type=radio]),textarea,select{
+  width:100%;
+  min-width:0;
+  padding:0 var(--sp-3);
+  border:1px solid var(--line-input);
+  border-radius:var(--r-field);
+  background:var(--panel);
+  color:var(--ink);
+  font-size:var(--fs-body);
+  transition:border-color .12s ease, box-shadow .12s ease, background-color .12s ease;
+}
+input:not([type=checkbox]):not([type=radio]),select{height:var(--h-ctl)}
+textarea{min-height:88px;padding:var(--sp-3);resize:vertical;line-height:1.62}
+
+/* hover：边界加重一档，告诉人这里可以点 */
+input:not([type=checkbox]):not([type=radio]):hover:not(:disabled):not([aria-invalid=true]),
+textarea:hover:not(:disabled):not([aria-invalid=true]),
+select:hover:not(:disabled):not([aria-invalid=true]){border-color:var(--line-hover)}
+
+/* focus：不再只用 outline，加一圈 3px 浅色环；边界同时变主色 */
+input:not([type=checkbox]):not([type=radio]):focus-visible,
+textarea:focus-visible,
+select:focus-visible{
+  outline:none;
+  border-color:var(--blue);
+  box-shadow:var(--focus-ring) var(--blue2);
+}
+
+/* 错误态：旧文件对输入框错误态零样式，全靠浏览器原生气泡。
+   注意选择器必须带齐 :not() 前缀：基础规则是 0,2,1，只写 input[aria-invalid] 是 0,1,1，会被基础规则盖死。
+   这个坑实测过：带前缀前，错误态的边框仍是 rgb(135,142,151)。 */
+input:not([type=checkbox]):not([type=radio])[aria-invalid=true],
+textarea[aria-invalid=true],select[aria-invalid=true]{
+  border-color:var(--line-invalid);
+  box-shadow:var(--focus-ring) var(--red2);
+}
+.field-error{margin:var(--sp-2) 0 0;font-size:var(--fs-meta);line-height:1.55;color:var(--red)}
+
+/* 禁用：旧文件只有 button 有 disabled 样式。同样必须带齐 :not() 前缀 */
+input:not([type=checkbox]):not([type=radio]):disabled,
+textarea:disabled,select:disabled{
+  background:var(--line-soft);
+  color:var(--muted);
+  border-color:var(--line);
+  cursor:not-allowed;
+}
+
+/* 3.2 下拉：自绘箭头，去掉系统灰框 */
+select{
+  appearance:none;
+  padding-right:var(--sp-8);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23697077' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right var(--sp-3) center;
+  cursor:pointer;
+}
+select::-ms-expand{display:none}
+
+/* 3.3 复选框 / 单选：accent-color 一行解决串色。
+   为什么不用 appearance:none 全自绘：本项目无构建链、且回归测试要能断言得到原生控件；
+   accent-color 拿到品牌色，同时保留原生键盘与读屏行为，代价是方框形状仍跟随系统。 */
+input[type=checkbox],input[type=radio]{
+  width:var(--size-check);
+  height:var(--size-check);
+  margin:0;
+  accent-color:var(--blue);
+  cursor:pointer;
+  flex:0 0 auto;
+}
+input[type=checkbox]:focus-visible,input[type=radio]:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+input[type=checkbox]:disabled,input[type=radio]:disabled{cursor:not-allowed;opacity:.55}
+
+/* 3.4 标签与字段组：旧文件 label{gap:7px;margin-bottom:17px}，不在任何档位上 */
+label{display:grid;gap:var(--sp-2);margin-bottom:var(--sp-5);font-size:var(--fs-note);font-weight:600;color:var(--ink)}
+label.check,label.radio{display:flex;align-items:center;gap:var(--sp-2);margin:0;font-size:var(--fs-note);font-weight:400;cursor:pointer}
+label.check:hover{color:var(--ink)}
+.field-hint{margin:calc(-1 * var(--sp-3)) 0 var(--sp-5);font-size:var(--fs-meta);line-height:1.55;color:var(--muted)}
+fieldset{border:0;padding:0;margin:0 0 var(--sp-6);min-width:0}
+legend{padding:0 0 var(--sp-3);font-size:var(--fs-meta);font-weight:700;letter-spacing:.02em;color:var(--muted)}
+
+/* 字段组：两个字段并排，间距走 scale */
+.field-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 var(--sp-6)}
+
+
+/* ============================ 四、按钮 ============================ */
+button,.button{
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2);
+  height:var(--h-ctl);
+  padding:0 var(--sp-5);
+  border:1px solid var(--line-strong);
+  border-radius:var(--r-field);
+  background:var(--panel);
+  color:var(--ink);
+  font-size:var(--fs-note);font-weight:600;
+  cursor:pointer;white-space:nowrap;
+  box-shadow:var(--elev-1), var(--edge);
+  transition:background-color .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+button:hover,.button:hover{background:var(--blue2);border-color:var(--line-input)}
+button:active,.button:active{box-shadow:var(--edge-seat);transform:translateY(.5px)}
+button:disabled,.button[aria-disabled=true]{opacity:.5;cursor:not-allowed;box-shadow:var(--edge-seat);transform:none}
+button:disabled:hover{background:var(--panel);border-color:var(--line-strong)}
+
+.primary{background:var(--blue);border-color:var(--blue);color:var(--on-accent)}
+.primary:hover{background:var(--blue-deep);border-color:var(--blue-deep)}
+.primary:disabled,.primary:disabled:hover{background:var(--blue);border-color:var(--blue)}
+
+.danger{color:var(--red);border-color:var(--red)}
+.danger:hover{background:var(--red2);border-color:var(--red)}
+
+/* 小号：表格行内、卡片头上那些 */
+.btn-sm,.btn-quiet{height:var(--h-ctl-sm);padding:0 var(--sp-3);font-size:var(--fs-meta)}
+/* 安静按钮也要看得出是按钮。悬停用实底填充（借 MicroKit 的 Next Dot Fill 方向，
+   但只借“填充”不借它的圆点放大与标签错位），填充是颜色过渡，不是位移。 */
+.btn-quiet{color:var(--muted);border-color:var(--line-strong);background:var(--panel);box-shadow:var(--elev-1), var(--edge);
+  transition:background-color var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out)}
+.btn-quiet:hover{color:var(--on-accent);border-color:var(--blue);background:var(--blue)}
+.btn-quiet:active{box-shadow:var(--edge-seat)}
+
+/* 文字按钮：卡片头上的「清空」这类。原来无边框无阴影、只有 19px 高，看着不像能点。
+   现在给它一个真按钮的壳（边框 + 阴影 + 32px 高），悬停同样实底填充。 */
+.linkish{
+  display:inline-flex;align-items:center;
+  height:var(--h-ctl-sm);padding:0 var(--sp-3);
+  border:1px solid var(--line-strong);border-radius:var(--r-field);
+  background:var(--panel);
+  box-shadow:var(--elev-1), var(--edge);
+  font-size:var(--fs-meta);font-weight:600;color:var(--muted);cursor:pointer;
+  transition:background-color var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out);
+}
+.linkish:hover{color:var(--on-accent);border-color:var(--blue);background:var(--blue);text-decoration:none}
+.linkish:active{box-shadow:var(--edge-seat)}
+
+
+/* ============================ 五、徽标与芯片 ============================ */
+/* 徽标用 --r-selector，和按钮的 --r-field 分开，读起来不再和按钮一样重 */
+.badge{
+  display:inline-block;padding:3px var(--sp-2);
+  border-radius:var(--r-selector);
+  background:var(--blue2);color:var(--blue);
+  font-size:var(--fs-meta);font-weight:600;line-height:1.5;white-space:nowrap;
+  box-shadow:var(--edge);
+}
+.badge.warn{color:var(--orange);background:var(--orange2)}
+.badge.good{color:var(--green);background:var(--green2)}
+.badge.bad{color:var(--red);background:var(--red2)}
+
+.chip{display:inline-block;padding:3px var(--sp-3);border-radius:var(--r-pill);background:var(--blue2);color:var(--blue);font-size:var(--fs-meta);font-weight:600;white-space:nowrap;box-shadow:var(--edge)}
+.chip.warn{background:var(--orange2);color:var(--orange)}
+.chip.good{background:var(--green2);color:var(--green)}
+.chip.bad{background:var(--red2);color:var(--red)}
+/* 计数与徽标同字号同字重，不再单独一档 10px */
+/* 计数与页签同字号。用颜色区分含义，不靠缩小字号：“待处理”是提醒，就用橙。 */
+.tabs-count{display:inline-block;margin-left:var(--sp-2);padding:0 var(--sp-2);border-radius:var(--r-pill);background:var(--line-soft);color:var(--muted-ink);font-size:inherit;font-weight:600;font-variant-numeric:tabular-nums;box-shadow:var(--edge)}
+.tabs-count.warn{background:var(--orange2);color:var(--orange)}
+
+
+/* ============================ 六、卡片与模块 ============================ */
+/* 层次改由阴影承担：外框走 --line-strong 一次，内部不再继续套同色边框 */
+.panel{
+  background:var(--panel);
+  border:1px solid var(--line-strong);
+  border-radius:var(--r-box);
+  padding:var(--sp-6);
+  margin-bottom:var(--sp-6);
+  box-shadow:var(--elev-1), var(--edge-seat);
+}
+.panel>h2:first-child{margin-bottom:var(--sp-4)}
+.form-grid{gap:0 var(--sp-6)}
+/* 嵌在别的容器里的模块：不再加边框，改用浅底 + 一条分隔线 */
+.subpanel{background:var(--line-soft);border:0;border-radius:var(--r-field);padding:var(--sp-4)}
+.card{border:1px solid var(--line-strong);border-radius:var(--r-box);background:var(--panel);box-shadow:var(--elev-1), var(--edge-seat)}
+.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-4);padding:var(--sp-5) var(--sp-6) 0}
+.card-head h2{font-size:var(--fs-card)}
+.card-head p{font-size:var(--fs-meta);color:var(--muted);margin:var(--sp-1) 0 0}
+
+/* 页面骨架 */
+.shell{display:grid;grid-template-columns:205px minmax(0,1fr);min-height:100dvh}
+.shell>aside{position:sticky;top:0;height:100dvh;overflow-y:auto;background:var(--navy);color:var(--side-ink);padding:var(--sp-6) var(--sp-4)}
+.brand{display:block;color:var(--side-ink);font-size:var(--fs-lg);font-weight:800;margin:0 var(--sp-3) var(--sp-7)}
+/* 侧栏导航必须限定在 .shell>aside 里。
+   workspace.css 里写的是无限制的 nav a / nav a:hover，而面包屑也是一个 <nav>，
+   于是侧栏那套（display:block、padding:11px 16px、悬停深色底 #1d303b）整套套到了面包屑上。
+   与 B-RESULT.md 里记的 aside{...} 套住右栏是同一类 bug。 */
+.shell>aside nav a{display:block;padding:11px var(--sp-4);margin:3px 0;border-radius:var(--r-selector);color:var(--side-muted)}
+.shell>aside nav a:hover{background:var(--side-hover);color:var(--side-ink)}
+.shell>aside nav a.active{background:var(--side-active);color:var(--side-ink);font-weight:700;box-shadow:inset 2px 0 var(--side-accent)}
+.nav-divider{border-top:1px solid var(--side-line);margin:var(--sp-5) var(--sp-3)}
+main{height:100dvh;overflow:auto;min-width:0}
+header{position:sticky;top:0;z-index:100;background:var(--glass-bg);backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--line-strong);padding:var(--sp-4) var(--sp-7)}
+@supports not (backdrop-filter:blur(1px)){header{background:var(--panel)}}
+/* 面包屑：字号从 12px 提到 18px（+50%）。
+   逐项写满 display / padding / margin / background：
+   workspace.css 里的 nav a 会把面包屑这个 <nav> 里的链接变成块级 + 11px 16px 内边距，
+   悬停还会给一块深色底（实测 rgb(29,48,59) = --side-hover）。悬停只要阴影，不要底色。 */
+#breadcrumb{display:flex;align-items:center;gap:var(--sp-1);font-size:var(--fs-note);color:var(--muted);flex-wrap:wrap}
+#breadcrumb a,#breadcrumb [aria-current]{
+  display:inline-flex;align-items:center;
+  padding:4px var(--sp-2);margin:0;
+  border-radius:var(--r-selector);
+  background:none;
+  font-family:inherit;font-size:inherit;line-height:inherit;
+}
+#breadcrumb a{color:var(--muted);font-weight:400;transition:color .12s ease, box-shadow .12s ease}
+#breadcrumb a:hover{background:none;color:var(--blue);box-shadow:var(--elev-1);text-decoration:none}
+#breadcrumb [aria-current]{color:var(--ink);font-weight:600}
+.crumb-sep{color:var(--faint);font-family:inherit;font-size:inherit;line-height:inherit}
+#view{padding:var(--sp-6) var(--sp-7) 60px;max-width:1400px}
+
+
+/* ============================ 七、表格 ============================ */
+.table-scroll{overflow:auto;border-radius:var(--r-field)}
+table{width:100%;border-collapse:collapse;text-align:left;font-variant-numeric:tabular-nums}
+
+/* 表头：旧文件和 td 用完全相同的边框与颜色，没有视觉权重。
+   这里表头下边升到 --line-strong，字重 600，并吸顶。
+   字号：全站表格统一 13px，不再出现「主表 14 / 明细 12 / 弹窗 13」三种。 */
+table{width:100%;border-collapse:collapse;text-align:left;font-variant-numeric:tabular-nums;font-size:var(--fs-note)}
+th{
+  position:sticky;top:0;z-index:1;
+  padding:var(--sp-3) var(--sp-3);
+  background:var(--line-soft);
+  border-bottom:1px solid var(--line-strong);
+  color:var(--muted);
+  font-size:var(--fs-meta);font-weight:600;
+  white-space:nowrap;
+}
+td{padding:var(--sp-3);border-bottom:1px solid var(--line);vertical-align:middle;font-size:var(--fs-note)}
+tbody tr{transition:background-color .12s ease}
+tbody tr:hover{background:var(--blue2)}
+/* 同上：悬停行里的辅助信息升一档，保证 4.5:1 */
+tbody tr:hover .cell-sub{color:var(--muted-ink)}
+tbody tr:last-child td{border-bottom:0}
+
+/* 单元格内容：标题行 + 一行辅助信息，行高不随内容跳 */
+.cell-main{display:block;font-weight:600;line-height:1.45}
+.cell-sub{display:block;margin-top:var(--sp-1);font-size:var(--fs-meta);color:var(--muted);line-height:1.5}
+
+/* 纯数字列右对齐：只给带 num-table 的表用，报告正文里的 markdown 表格不受影响 */
+.num-table th+th,.num-table td+td{text-align:right}
+.empty{padding:var(--sp-8) var(--sp-4);color:var(--muted);text-align:center}
+
+
+/* ============================ 八、页签、工具栏、提示条 ============================ */
+.toolbar{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-4)}
+.toolbar>*{margin:0}
+
+.tabs,.tabbar{position:relative;display:flex;gap:2px;border-bottom:1px solid var(--line-strong);margin-bottom:var(--sp-5)}
+.tabs a,.tabbar a{padding:11px var(--sp-4);border-radius:var(--r-selector) var(--r-selector) 0 0;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;font-size:var(--fs-body);transition:color var(--t-base) var(--ease-out)}
+.tabs a:hover,.tabbar a:hover{color:var(--ink);background:var(--blue2)}
+.tabs a.active,.tabs a[aria-current],.tabbar a[aria-current]{color:var(--ink);font-weight:700;border-bottom-color:var(--accent);background:none}
+/* 滑动指示条，借 MicroKit 的 Sliding Underline Tabs：
+   一条绝对定位的条用 transform: translateX() 滑过去，不是每个页签各画一条边。
+   静态下划线保留作为兜底（JS 没跑起来时仍然能看出当前页），
+   指示条就绪后加上 .has-indicator 把静态那条撤掉，否则会同时出现两条线。 */
+.tabs.has-indicator a[aria-current]{border-bottom-color:transparent}
+.tabs-indicator{
+  position:absolute;left:0;bottom:-1px;height:2px;width:0;
+  background:var(--accent);border-radius:var(--r-pill);
+  pointer-events:none;opacity:0;
+  transition:transform var(--t-base) var(--ease-glide), width var(--t-base) var(--ease-glide), opacity var(--t-fast) linear;
+}
+.tabs-indicator.is-ready{opacity:1}
+
+/* 提示条：状态贴在被描述的产物上，不放页头顶 */
+#notice{margin:var(--sp-4) var(--sp-7) 0;padding:var(--sp-3) var(--sp-4);background:var(--notice-bg);border:1px solid var(--notice-line);border-radius:var(--r-field);color:var(--notice-ink);font-size:var(--fs-note);line-height:1.6}
+
+/* 列表行：一行一个对象，行内分隔用 --line，不再用 --line-soft */
+.row{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-4);padding:var(--sp-3) 0;border-bottom:1px solid var(--line)}
+.row>:first-child{min-width:0}
+.row:last-child{border-bottom:0}
+.row small{display:block;color:var(--muted);margin-top:var(--sp-1);line-height:1.55}
+
+.fact-list{margin:var(--sp-4) 0 0;padding:0;list-style:none}
+.fact-list li{border-top:1px solid var(--line);padding:var(--sp-3) 0;font-size:var(--fs-meta);color:var(--muted);line-height:1.6}
+.fact-list li:first-child{border-top:0}
+.fact-list strong{color:var(--ink);font-weight:600}
+
+/* 产物预览台：状态条贴产物底部 */
+.stage{border:1px solid var(--line-strong);border-radius:var(--r-box);overflow:hidden;background:var(--panel);box-shadow:var(--edge-seat)}
+.stage .report,.stage-body{padding:var(--sp-6)}
+.stage-status{margin:0;padding:var(--sp-3) var(--sp-4);border-top:1px solid var(--line);background:var(--line-soft);color:var(--muted-ink);font-size:var(--fs-meta);line-height:1.6;display:flex;align-items:center;gap:var(--sp-2);font-variant-numeric:tabular-nums}
+.stage-status::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--blue);flex:0 0 auto}
+.stage-status.good::before{background:var(--green)}
+.stage-status.warn::before{background:var(--orange-mark)}
+.stage-status.bad::before{background:var(--red)}
+
+pre{white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:var(--fs-note);line-height:1.7}
+
+
+/* ============================ 九、弹窗 ============================ */
+dialog{
+  width:min(640px,92vw);
+  max-height:calc(100dvh - 40px);
+  border:1px solid var(--line-strong);
+  border-radius:var(--r-box);
+  background:var(--panel);
+  color:var(--ink);
+  padding:var(--sp-6);
+  box-shadow:var(--elev-3);
+  z-index:200;
+}
+dialog::backdrop{background:#14212b66}
+/* 标题与按钮固定，中间内容自己滚。不修的话内容一长标题就被顶出屏幕 */
+#modal-form,#modal-body{display:flex;flex-direction:column}
+#modal-form{max-height:calc(100dvh - 40px)}
+#modal-body{overflow:auto;min-height:0}
+.dialog-head{display:flex;justify-content:space-between;align-items:start;gap:var(--sp-5);margin-bottom:var(--sp-5);flex:0 0 auto}
+.dialog-head h2{font-size:var(--fs-section)}
+dialog footer{display:flex;justify-content:end;gap:var(--sp-3);margin-top:var(--sp-6);flex:0 0 auto}
+#modal-error,.dialog-error{color:var(--red);font-size:var(--fs-note);margin:var(--sp-3) 0 0}
+#modal-error:empty{display:none}
+#modal-body th,#modal-body td{padding:var(--sp-2) var(--sp-3)}
+#modal-body td:nth-child(2),#modal-body td:nth-child(3),#modal-body .badge{white-space:nowrap}
+
+
+/* ============================ 十、批量发布页版式 ============================ */
+.proto-strip{margin:0 var(--sp-7);padding:var(--sp-3) var(--sp-4);border:1px dashed var(--line-input);border-radius:var(--r-field);font-size:var(--fs-meta);line-height:1.6;color:var(--muted-ink)}
+.proto-strip strong{color:var(--ink)}
+
+/* 页头副标：说明文字用 13px，不再和表格正文同号 */
+.page-lead{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--sp-6);flex-wrap:wrap;margin-bottom:var(--sp-7);padding-top:var(--sp-1)}
+.page-lead h1{margin:0 0 var(--sp-2);font-size:var(--fs-page);letter-spacing:-.01em}
+.page-lead p{margin:0;font-size:var(--fs-note);color:var(--muted)}
+.page-actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--sp-3);flex-wrap:wrap}
+.page-actions>*{margin:0}
+.field-inline{display:flex;align-items:center;gap:var(--sp-2);margin:0}
+.field-inline>span{font-size:var(--fs-meta);color:var(--muted);white-space:nowrap}
+.field-inline select{width:auto;min-width:130px}
+
+/* 准入条：不再用彩色侧边（橙色侧边容易被读成告警/错误）。
+   结论靠数字本身的颜色（0/10 是橙色）与下面那句话表达。
+   标签从 10px/--faint（3.13:1）改成 12px/--muted（4.78:1）：
+   它们标的是全页最重要的数字，不该是全页最读不清的文字。*/
+.gate{background:var(--panel);border:1px solid var(--line-strong);border-radius:var(--r-box);padding:var(--sp-5) var(--sp-6);margin-bottom:var(--sp-6);box-shadow:var(--elev-1), var(--edge-seat)}
+.gate-top{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-7);flex-wrap:wrap}
+.gate-facts{display:flex;gap:var(--sp-7);flex-wrap:wrap;margin:0;padding:0;list-style:none}
+.gate-facts li{display:flex;flex-direction:column;gap:3px}
+.gate-facts span{font-size:var(--fs-meta);letter-spacing:.02em;color:var(--muted)}
+.gate-facts strong{font-size:var(--fs-metric);line-height:1.2;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.gate-facts strong.warn{color:var(--orange)}
+.gate-facts strong.good{color:var(--green)}
+.gate-note{margin:var(--sp-4) 0 0;font-size:var(--fs-note);color:var(--muted)}
+.gate-details{margin-top:var(--sp-4);border-top:1px solid var(--line);padding-top:var(--sp-4)}
+/* 展开按钮：原来是一行 12px 灰字 + 系统三角形，很容易被忽略。
+   改成整行、有边框与阴影的真按钮，右侧自绘小箭头，展开时箭头翻转。 */
+.gate-details summary{
+  display:flex;align-items:center;gap:var(--sp-2);
+  width:100%;min-height:36px;padding:0 var(--sp-3);
+  list-style:none;cursor:pointer;
+  border:1px solid var(--line-strong);border-radius:var(--r-field);
+  background:var(--panel);box-shadow:var(--elev-1);
+  font-size:var(--fs-note);font-weight:600;color:var(--ink);
+  transition:background-color .12s ease, border-color .12s ease;
+}
+.gate-details summary::-webkit-details-marker{display:none}
+.gate-details summary::after{content:"";margin-left:auto;width:7px;height:7px;flex:0 0 auto;
+  border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+  transform:rotate(45deg) translate(-2px,-2px);transition:transform .12s ease}
+.gate-details[open] summary::after{transform:rotate(-135deg) translate(-2px,-2px)}
+.gate-details summary:hover{border-color:var(--blue);background:var(--blue2);color:var(--blue-deep)}
+.gate-details[open] summary{border-color:var(--blue);color:var(--blue-deep)}
+.gate-details table{margin-top:var(--sp-4);min-width:660px}
+
+/* 双栏：内容宽、平台窄 */
+.prep-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:var(--sp-6);margin-bottom:var(--sp-6)}
+.pick-col{background:var(--panel);border:1px solid var(--line-strong);border-radius:var(--r-box);min-width:0;display:flex;flex-direction:column;box-shadow:var(--elev-1), var(--edge-seat)}
+.pick-head{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-4);padding:var(--sp-4) var(--sp-6);border-bottom:1px solid var(--line)}
+.pick-head h2{font-size:var(--fs-card)}
+.pick-head-right{display:flex;align-items:center;gap:var(--sp-4)}
+/* 「全选」与「清空」是并列的对称操作，字号字重颜色必须一致 */
+.pick-head label.check{font-size:var(--fs-meta);font-weight:600;color:var(--muted)}
+
+.pick-list{flex:1 1 auto;min-height:0;max-height:430px;overflow:auto}
+.pick-list-tail{padding:var(--sp-3) var(--sp-6);font-size:var(--fs-meta);color:var(--muted);border-top:1px solid var(--line)}
+.pick-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:var(--sp-4);padding:var(--sp-3) var(--sp-6);align-items:start;border-bottom:1px solid var(--line);transition:background-color .12s ease}
+.pick-row:last-child{border-bottom:0}
+.pick-row:hover,.pick-row:focus-within{background:var(--blue2)}
+/* 悬停底色是 --blue2，次级文字若继续用 --muted 只有 4.42:1，差 0.08 不达 AA。
+   把底色改淡会让 hover 看不见，所以改成：悬停时次级文字升一档到 --muted-ink（4.75:1），
+   顺带让被指向的那一行读起来更清楚 */
+.pick-row:hover .pick-meta,.pick-row:focus-within .pick-meta{color:var(--muted-ink)}
+.pick-row.picked{background:var(--blue2)}
+.pick-row input[type=checkbox]{margin-top:3px}
+label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-body)}
+.pick-row.picked label.pick-title{color:var(--blue-deep)}
+.pick-meta{display:flex;align-items:center;gap:var(--sp-2);margin:var(--sp-1) 0 0;font-size:var(--fs-meta);color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* 平台芯片：借参考站列表页的 chip 行 */
+.chips{display:flex;flex-wrap:wrap;gap:var(--sp-2);padding:var(--sp-4) var(--sp-6) 0}
+.pick-chip{display:inline-flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-3);border:1px solid var(--line-strong);border-radius:var(--r-pill);background:var(--panel);box-shadow:var(--edge);cursor:pointer;font-size:var(--fs-note);font-weight:600;line-height:1.3;color:var(--ink);transition:background-color .12s ease, border-color .12s ease}
+.pick-chip:hover{border-color:var(--blue);background:var(--blue2)}
+.pick-chip input[type=checkbox]{width:14px;height:14px}
+.pick-chip.picked{background:var(--blue2);border-color:var(--blue);color:var(--blue-deep);box-shadow:var(--edge)}
+.pick-chip .st{width:7px;height:7px;border-radius:50%;background:var(--orange-mark);flex:0 0 auto}
+.pick-chip .st.good{background:var(--green)}
+.pick-chip .st.grey{background:var(--line-input)}
+.chip-legend{margin:var(--sp-4) var(--sp-6) var(--sp-5);display:flex;gap:var(--sp-5);flex-wrap:wrap;font-size:var(--fs-meta);color:var(--muted)}
+.chip-legend i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:var(--sp-2)}
+.chip-legend i.warn{background:var(--orange-mark)}
+.chip-legend i.grey{background:var(--line-input)}
+
+/* 提交条：不再用蓝色顶边，靠阴影浮起来表现「它是浮层」，并加毛玻璃（借 liquefy-ui 的玻璃顶栅） */
+.submit-bar{position:sticky;bottom:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:var(--sp-6);flex-wrap:wrap;
+  background:var(--glass-bg);backdrop-filter:var(--glass-blur);border:1px solid var(--line-strong);border-radius:var(--r-box);
+  padding:var(--sp-4) var(--sp-6);margin-top:var(--sp-6);box-shadow:var(--elev-2), var(--edge-seat)}
+@supports not (backdrop-filter:blur(1px)){.submit-bar{background:var(--panel)}}
+.submit-facts{margin:0;font-size:var(--fs-card);font-variant-numeric:tabular-nums}
+.submit-facts strong{font-size:var(--fs-metric);letter-spacing:-.01em}
+
+/* 发布记录 */
+#records{padding:0 0 var(--sp-3)}
+.rec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-5);padding:var(--sp-5) var(--sp-6) 0;flex-wrap:wrap}
+.rec-head h2{font-size:var(--fs-card)}
+.rec-head p{font-size:var(--fs-meta);color:var(--muted);margin:var(--sp-1) 0 0}
+.rec-group{padding:var(--sp-2) var(--sp-6) var(--sp-5)}
+.rec-group-title{display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-4);padding:var(--sp-4) 0 var(--sp-1);border-top:1px solid var(--line)}
+.rec-group:first-of-type .rec-group-title{border-top:0}
+.rec-group-title strong{font-size:var(--fs-note)}
+.rec-item{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-5);padding:var(--sp-3) 0;border-top:1px solid var(--line)}
+.rec-item-main{min-width:0}
+.rec-item-main small{display:block;font-size:var(--fs-meta);color:var(--muted);margin-top:var(--sp-2);line-height:1.6}
+.empty-block{padding:70px var(--sp-6);text-align:center;color:var(--muted)}
+
+
+/* ============================ 十一、降级与无障碍 ============================ */
+/* 本项目 MOTION_INTENSITY = 2：只允许颜色过渡，不允许位移与缩放动画 */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important}
+}
+@media(max-width:1180px){
+  .prep-grid{grid-template-columns:1fr}
+  .pick-list{max-height:none}
+}
+/* 项目概览的结论条也走标准卡片边界，不再另外画一条彩色侧边。 */
+.summary{border-left:1px solid var(--line-strong)}
+/* 网格/卡片子项允许收缩；宽表只在自己的容器内滚，不把整页撑宽。 */
+.split>*,.ov-grid>*,.card,.panel{min-width:0}
+.table-scroll{max-width:100%}
+@media(max-width:760px){
+  .shell{grid-template-columns:145px minmax(0,1fr)}
+  .shell>aside{padding:var(--sp-5) var(--sp-2)}
+  .brand{font-size:var(--fs-card);margin-left:var(--sp-2)}
+  #view,header{padding-left:var(--sp-4);padding-right:var(--sp-4)}
+  .proto-strip{margin:0 var(--sp-4)}
+  .page-lead h1{font-size:var(--fs-page)}
+  .page-actions{width:100%;justify-content:flex-start}
+  .field-inline{width:100%}.field-inline select{flex:1 1 auto;width:100%}
+  .row{flex-wrap:wrap}.row>*{max-width:100%;overflow-wrap:anywhere}
+  .tabs{max-width:100%;overflow-x:auto;flex-wrap:nowrap}.tabs a{flex:0 0 auto}
+  .hero-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-grid>div{min-width:0}
+  .score-body{flex-direction:column;align-items:flex-start}.score-copy{min-width:0;max-width:100%;overflow-wrap:anywhere}
+  .qchart{max-width:100%;overflow-x:auto;justify-content:flex-start}.qgroup{min-width:27px}
+  .submit-bar{position:static;box-shadow:var(--elev-1)}
+  .gate-facts{gap:var(--sp-5)}
+}

@@ -32,13 +32,27 @@ function md(text) {
  return out.join('');
 }
 const labels = {workbench:'工作台',projects:'诊断项目',actions:'改善任务',content:'内容生产',publications:'批量发布',reports:'报告中心',platforms:'模型与平台',settings:'设置'};
+const pageIntro = {
+ '工作台':'集中查看待处理事项和最近活动。',
+ '诊断项目':'创建并管理 GEO 诊断项目。',
+ '改善任务':'把诊断结论转成可执行的改善任务。',
+ '内容生产':'从改善任务生成、编辑并审核发布内容。',
+ '批量发布':'把已审核的内容一次投到多个平台。',
+ '报告中心':'查看诊断报告、数据质量和原始数据。',
+ '模型与平台':'查看诊断模型与发布平台的接入方式。',
+ '设置':'设置工作空间名称和默认操作人。'
+};
 const states = {archived:'已终止',degraded:'报告不完整',login:'等待登录',frozen:'待检查',preflight:'检查中',ready:'可执行',running:'执行中',paused:'等待人工处理',blocked:'需处理',interrupted:'已中断',completed:'已完成',pending:'待执行',success:'成功',failed:'失败',manual_required:'需人工处理',todo:'待办',doing:'进行中'};
 let epoch = 0, timer = null;
-const route = () => { const [view='workbench', query=''] = location.hash.slice(1).split('?'); return {view, params:new URLSearchParams(query)}; };
+// 批量发布的勾选与页签指示条几何：跨重渲染、跨轮询都要保住
+let pubPicked = [], pubPlats = [], pubTabGeo = null;
+const route = () => { const [rawView='', query=''] = location.hash.slice(1).split('?'); return {view:rawView||'workbench', params:new URLSearchParams(query)}; };
 const link = (view, project, tab) => '#'+view+(project?'?project='+encodeURIComponent(project)+(tab?'&tab='+tab:''):'');
 async function api(path, method='GET', body) { const abort=new AbortController(),deadline=setTimeout(()=>abort.abort(),20000);try{const r=await fetch(API+path,{method,signal:abort.signal,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}); const d=await r.json().catch(()=>({})); if(!r.ok) throw Error(typeof d.detail==='string'?d.detail:'提交信息有误，请检查填写内容'); return d;}catch(e){if(e.name==='AbortError')throw Error('请求超时，请刷新核对是否已保存，避免重复提交');if(e instanceof TypeError)throw Error('服务连接失败，请确认本地服务已启动后重新加载');throw e;}finally{clearTimeout(deadline);} }
 function notice(text) { $('#notice').textContent=text; $('#notice').hidden=!text; }
-function head(title, action='') { return `<div class="page-head"><h1>${esc(title)}</h1>${action}</div>`; }
+function head(title, action='', subtitle=pageIntro[title]||'') {
+ return `<div class="page-lead"><div><h1>${esc(title)}</h1>${subtitle?`<p>${esc(subtitle)}</p>`:''}</div>${action?`<div class="page-actions">${action}</div>`:''}</div>`;
+}
 function show(html, token) { if(token===epoch) $('#view').innerHTML=html; }
 const TONES={good:['completed','success','approved','已审核'],bad:['failed','interrupted','blocked'],warn:['pending','todo','frozen','manual_required','login','degraded']};
 const tone=s=>Object.keys(TONES).find(k=>TONES[k].includes(s))||'';
@@ -46,7 +60,8 @@ function badge(state) { return `<span class="badge ${tone(state)}">${esc(states[
 const TAB_LABEL={overview:'概览',profile:'主体资料',config:'诊断配置',runs:'执行与结果'};
 // 面包屑：项目上下文的页面可以一步回到项目列表或项目概览；最后一段不带链接，带 aria-current
 function crumbHTML(view,project,tab){
- const seg=[];
+ // 每一页都从同一个根节点开始，避免顶层页只有粗体当前项、项目页却从灰色链接开始。
+ const seg=[['工作空间',link('workbench')]];
  if(project){
   const onOverview=view==='projects'&&(!tab||tab==='overview');
   // 标签不用「诊断项目」：那和侧边导航同名，会让 get_by_role('link', name='诊断项目') 撞到两个元素。
@@ -85,7 +100,7 @@ async function render() {
  } else if(view==='projects') {
   const slug=params.get('project'), base='/api/projects/'+encodeURIComponent(slug), d=await api(base), tab=params.get('tab')||'overview';
   const tabs=`<div class="tabs">${[['overview','概览'],['profile','主体资料'],['config','诊断配置'],['runs','执行与结果']].map(([k,v])=>`<a class="${tab===k?'active':''}" href="${link('projects',slug,k)}">${v}</a>`).join('')}</div>`;
-  show(head(d.project.name,'<a class="button" href="#projects">返回项目列表</a>')+tabs+'<div id="project-view"></div>',token);if(token!==epoch)return;
+  show(head(d.project.name,'<a class="button" href="#projects">返回项目列表</a>','查看主体资料、诊断配置、执行过程与结果。')+tabs+'<div id="project-view"></div>',token);if(token!==epoch)return;
   $('#breadcrumb').innerHTML=crumbHTML('projects',d.project,tab);const v=$('#project-view'),p=d.profile;
   if(tab==='overview'){
    const o=await api(base+'/overview');if(token!==epoch)return;
@@ -171,7 +186,10 @@ async function render() {
  } else if(['actions','content','publications','reports'].includes(view)) {
   const projects=(await api('/api/projects')).projects;
   const chosen=projects.find(p=>p.slug===context);
-  show(head(labels[view])+`<div class="toolbar"><select id="scope" aria-label="当前项目"><option value="">选择项目</option>${projects.map(p=>`<option value="${p.slug}" ${p.slug===chosen?.slug?'selected':''}>${esc(p.name)}</option>`).join('')}</select>${!projects.length?'<button id="create">创建项目</button>':''}</div><div id="module"></div>`,token);
+  const scopeSel=`<select id="scope" aria-label="当前项目"><option value="">选择项目</option>${projects.map(p=>`<option value="${p.slug}" ${p.slug===chosen?.slug?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`;
+  const createBtn=!projects.length?'<button id="create">创建项目</button>':'';
+  // 四个项目上下文页面共用同一种一级页头：标题与说明在左，项目选择在右。
+  show(head(labels[view],`<label class="field-inline"><span>项目</span>${scopeSel}</label>${createBtn}`)+`<div id="module"></div>`,token);
   if(token!==epoch)return;$('#scope').onchange=e=>{sessionStorage.setItem('geo-project',e.target.value);location.hash=link(view,e.target.value);};if($('#create'))$('#create').onclick=createProject;
   if(!chosen){$('#module').innerHTML='<p class="empty">请选择需要处理的项目</p>';return;}
   $('#breadcrumb').innerHTML=crumbHTML(view,chosen,null);const base='/api/projects/'+chosen.slug;
@@ -224,82 +242,341 @@ async function render() {
      $('#direct').onclick=()=>modal('直接生成内容','<label>内容标题<input name="title" required maxlength="200" autofocus placeholder="例如：设备资产管理系统选型指南"></label><label>写作要点（每行一个，会生成小节标题）<textarea name="brief" placeholder="这个行业常见的问题\n选型要看的指标\n可核查的案例"></textarea></label><label>用途<input name="channel" placeholder="例如：公众号长文 / 官网页 / 知乎回答"></label><p class="muted">这里只生成结构大纲，正文与事实依据需要你填写；未补齐“待补充”段落不能通过审核。</p>',async data=>{const r=await api(base+'/content','POST',Object.fromEntries(data));location.hash=link('content',chosen.slug)+'&asset='+r.id;},'创建草稿');
     }
    } else {
+    // ===== 批量发布 =====
+    // 版式来自原型 v3：准入条 → 双页签 → 内容/平台双栏 → 贴底提交条 → 记录页签。
+    // 判定规则与 publish_adapters.Adapter.publish 一致：先查内容要素，再看平台能不能自动发。
     const caps=(await api('/api/platforms')).publication;if(token!==epoch)return;
     const loginState=await api('/api/platforms/login-state');if(token!==epoch)return;
     const assets=(await api(base+'/editorial/content')).items;if(token!==epoch)return;
-    const approved=assets.filter(x=>x.status==='approved'),drafts=assets.filter(x=>x.status!=='approved');
-    const names=Object.fromEntries(caps.map(p=>[p.id,p])),elem={title:'标题',body:'正文',facts:'事实依据',cover:'封面图'};
-    const browserIds=caps.filter(p=>p.mode==='browser').map(p=>p.id);
-    const st={draft_created:['已写入草稿箱','warn'],submitted:['已提交','good'],manual_required:['需人工发布','warn'],failed:['失败','bad'],published_manual:['人工已回填','good']};
-    const canPublish=approved.length>0;
-    const needsCover=id=>((names[id]||{}).requires||[]).includes('cover');
-    const wechat=caps.find(p=>p.id==='wechat_mp')||{};
-    const wechatReady=(wechat.credentials||[]).every(c=>c.configured);
-    const browserCaps=caps.filter(p=>p.mode==='browser');
-    const loginRows=d=>browserCaps.map(p=>{const s=(d.states||{})[p.id]||{};return `<tr><td>${esc(p.label)}</td><td><span class="badge ${esc(s.tone||'')}">${esc(s.label||'未检测')}</span></td><td class="muted">${esc(localTime(s.checked_at)||'—')}</td><td class="muted">${esc(s.note||'')}</td><td><button data-login-one="${esc(p.id)}">只开这一个</button></td></tr>`;}).join('');
-    const loginSummary=d=>{const s=d.session||{};if(s.active)return '登录窗口已打开，正在自动识别登录态（每 3 秒刷新，不用手动点）…';return s.message||'还没有检测过登录态：点「打开登录窗口」登录，或点「重新检测」。';};
-    const known={};Object.entries(loginState.states||{}).forEach(([k,v])=>{known[k]=v.state;});
-    $('#module').innerHTML=`
-     <section class="panel"><div class="card-head"><div><h2>确认后直接发布</h2><p>勾选内容与平台 → 「确认发布」→ 逐平台执行：公众号走官方 API 写入草稿箱，其余平台走浏览器自动化</p></div><div class="toolbar" style="margin:0"><button id="publish" class="primary" ${canPublish?'':'disabled'}>确认发布</button></div></div>
-      <div class="steps">
-       <div class="step ${canPublish?'done':'current'}"><strong><em>1</em>选择已审核内容</strong><span>${approved.length?`已审核 ${approved.length} 条${drafts.length?`，另有 ${drafts.length} 条未审核`:''}`:(drafts.length?`${drafts.length} 条内容还没通过审核`:'还没有内容')}</span></div>
-       <div class="step ${canPublish?'current':''}"><strong><em>2</em>勾选发布平台</strong><span>${canPublish?'公众号可用官方接口，其余走浏览器自动化':'需要先有已审核内容'}</span></div>
-       <div class="step ${items.length?'current':''}"><strong><em>3</em>查看结果</strong><span>${items.length?'下方发布记录显示每个平台的结果与原因':'发布后在这里查看每个平台结果'}</span></div>
-      </div></section>
-     ${canPublish?'':`<section class="panel"><h2>先准备一条已审核内容</h2><p class="muted">只能发布当前版本审核通过的内容。${drafts.length?`当前有 ${drafts.length} 条草稿待审核。`:'当前还没有内容。'}</p><div class="toolbar"><a class="button primary" href="${link('content',chosen.slug)}">去内容生产</a><a class="button" href="${link('actions',chosen.slug)}">从改善任务开始</a></div></section>`}
-     <section class="panel" id="login-panel"><div class="card-head"><div><h2>平台登录状态</h2><p>点「打开登录窗口」→ 在弹出的窗口里自己登录 → 登录成功会自动识别；全部识别到已登录后窗口自动关闭</p></div><div class="toolbar" style="margin:0"><button id="probe-login">重新检测</button><button id="login" class="primary">打开登录窗口</button></div></div><p class="muted" id="login-msg">${esc(loginSummary(loginState))}</p><div class="table-scroll"><table><thead><tr><th>平台</th><th>登录状态</th><th>最近识别</th><th>说明</th><th>操作</th></tr></thead><tbody id="login-rows">${loginRows(loginState)}</tbody></table></div><p class="muted" style="margin:12px 0 0">登录态存在本机隔离浏览器 profile 里，不写数据库、不导出 cookie；系统只读页面判断状态，不代填账号密码。</p></section>
-     <section class="panel"><div class="card-head"><div><h2>选择内容</h2><p>只列出当前版本审核通过的内容</p></div></div><div style="padding-top:4px">${approved.map(a=>`<label class="check" style="padding:10px 0;border-bottom:1px solid var(--line-soft)"><input type="checkbox" name="pick-asset" value="${a.id}">${esc(a.title)}</label>`).join('')||'<p class="empty">没有已审核内容</p>'}</div></section>
-     <section class="panel"><div class="card-head"><div><h2>选择平台</h2><p>每个平台的执行方式与前置条件</p></div></div><div class="table-scroll" style="padding-top:6px"><table><thead><tr><th>选择</th><th>平台</th><th>执行方式</th><th>前置条件</th></tr></thead><tbody>${caps.map(p=>`<tr><td><input type="checkbox" name="pick-platform" value="${p.id}"></td><td>${esc(p.label)}</td><td>${esc(p.mode_label)}</td><td class="muted">${esc(p.mode==='api'?(p.credentials.every(c=>c.configured)?'凭据已配置':'需先配置 AppID/AppSecret'):(p.mode==='browser'?'需在隔离浏览器登录该平台':'无自动接口，发布后回填链接'))}${needsCover(p.id)?' · 需要封面图':''}</td></tr>`).join('')}</tbody></table></div></section>
-     <section class="panel"><div class="card-head"><div><h2>发布记录</h2><p>每个内容 × 平台的结果、原因与证据</p></div></div><div style="padding-top:6px">${items.map(x=>`<div class="row"><div><strong>${esc(x.title_snapshot)}</strong><small>${esc((names[x.platform]||{}).label||x.platform)} · ${esc((names[x.platform]||{}).mode_label||x.mode||'')} · <span class="badge ${(st[x.status]||[])[1]||''}">${esc((st[x.status]||[x.status])[0])}</span></small>${x.adapter_note?`<small class="muted">${esc(x.adapter_note)}</small>`:''}${x.receipt_url?`<small>${esc(x.receipt_url)}</small>`:''}</div><div class="toolbar" style="margin:0">${['manual_required','failed'].includes(x.status)?`<button data-receipt="${x.id}">回填发布链接</button>`:''}</div></div>`).join('')||'<p class="empty">还没有发布记录。勾选内容和平台后点「确认发布」。</p>'}</div></section>
-     <details class="panel"><summary style="cursor:pointer"><strong>平台接入与凭据（${caps.length} 个）</strong> <span class="muted">公众号可填 AppID/AppSecret；其余平台用浏览器登录</span></summary><div class="table-scroll" style="padding-top:12px"><table><thead><tr><th>平台</th><th>执行方式</th><th>接口状态</th><th>内容要素</th><th>操作</th></tr></thead><tbody>${caps.map(p=>`<tr><td>${esc(p.label)}</td><td>${esc(p.mode_label)}</td><td>${p.mode==='manual'?'<span class="badge warn">人工</span>':(p.can_attempt?'<span class="badge good">可执行</span>':'<span class="badge warn">待配置</span>')}</td><td>${p.requires.map(r=>esc(elem[r]||r)).join('、')}</td><td>${p.id==='wechat_mp'?`<button data-cred="${p.id}">${wechatReady?'修改凭据':'填写凭据'}</button> <button data-checkcred="${p.id}">校验</button>`:(p.mode==='browser'?'<a class="button" href="#" data-login="1">登录窗口</a>':'—')}</td></tr>`).join('')}</tbody></table></div><p class="muted" style="margin:12px 0 0">${esc(wechat.entry||'')}${wechat.note?' · '+esc(wechat.note):''}</p></details>`;
-    $('#publish').onclick=async()=>{if(!canPublish){notice('还没有已审核内容，请先在内容生产里审核');return;}
-      const picked=[...document.querySelectorAll('[name="pick-asset"]:checked')].map(e=>e.value);
-      const plats=[...document.querySelectorAll('[name="pick-platform"]:checked')].map(e=>e.value);
-      if(!picked.length){notice('请先勾选要发布的内容');return;}
-      if(!plats.length){notice('请先勾选发布平台');return;}
-      const titleOf=id=>{const a=assets.find(x=>x.id===id);return a?a.title:id;};
-      const lines=[];let warns=[];
-      picked.forEach(id=>plats.forEach(pid=>{
-        const p=names[pid]||{label:pid,mode:'manual'};
-        let action=p.mode==='api'?'调用官方接口写入公众号草稿箱':(p.mode==='browser'?'浏览器自动化创建':'人工发布（回填链接）');
-        if(needsCover(pid)){action='缺 封面图，将转人工';warns.push(`${p.label} 需要封面图`);}
-        if(p.mode==='api'&&!(p.credentials||[]).every(c=>c.configured)){action='未配置凭据，将转人工';warns.push(`${p.label} 未配置 AppID/AppSecret`);}
-        lines.push(`${esc(titleOf(id))} → ${esc(p.label)}：${action}`);
-      }));
-      modal('确认发布','<p class="muted">确认后立即执行，不再有“创建任务”这一步。</p><ul class="fact-list" style="margin:10px 0">'+lines.map(l=>`<li>${l}</li>`).join('')+'</ul>'+(warns.length?`<p class="muted">注意：${esc([...new Set(warns)].join('；'))}</p>`:'')+'<label class="check"><input type="checkbox" required>确认内容已审核，同意按上述方式发布</label>',async()=>{const r=await api(base+'/publish','POST',{asset_ids:picked,platforms:plats,confirm:true,operator:''});const ok=r.results.filter(x=>['draft_created','submitted'].includes(x.status)).length;notice(`已执行 ${r.results.length} 条：成功 ${ok} 条，需人工 ${r.results.filter(x=>x.status==='manual_required').length} 条，失败 ${r.results.filter(x=>x.status==='failed').length} 条`);},'确认发布');
+    const jobs=(await api(base+'/editorial/publications')).items;if(token!==epoch)return;
+    const pubTab=params.get('tab')==='history'?'history':'prep';
+    const pubBase=link('publications',chosen.slug);
+
+    // 登录态与平台能力是「会变」的，放进 LIVE 里，轮询只重画不看重建 DOM
+    const LIVE={caps,loginState};
+    const elemLabel={title:'标题',body:'正文',facts:'事实依据',cover:'封面图'};
+    const status4={draft_created:['已写入草稿箱','good'],submitted:['已提交','good'],
+      published_manual:['人工已回填','good'],manual_required:['转人工','warn'],failed:['失败','bad']};
+    // 勾选状态存在模块级，跨页签与轮询都不丢
+    const picked=new Set(pubPicked),plats=new Set(pubPlats);
+    const keep=()=>{pubPicked=[...picked];pubPlats=[...plats];};
+
+    const approved=assets.filter(a=>a.status==='approved');
+    const drafts=assets.filter(a=>a.status!=='approved');
+    const platById=id=>LIVE.caps.find(p=>p.id===id);
+    const lState=id=>(LIVE.loginState.states||{})[id]||{};
+    const isLogged=id=>lState(id).state==='logged_in';
+    const credsReady=p=>(p.credentials||[]).every(c=>c.configured);
+    // 一个平台自己能不能自动发。api 看凭据，browser 看登录态，manual 无接口。
+    const platState=p=>p.mode==='manual'?{text:'无自动接口',tone:'grey'}
+      :p.mode==='api'?(credsReady(p)?{text:'可直发',tone:'good'}:{text:'待配凭据',tone:''})
+      :(isLogged(p.id)?{text:'可直发',tone:'good'}:{text:'需登录',tone:''});
+    const missingOf=(a,p)=>(p.requires||[]).filter(k=>k==='cover'?true:!String(a[k]??'').trim());
+    // 单对「内容 × 平台」的结果。短说与长说共用词根。
+    const pairAction=(a,p)=>{
+      if(p.mode==='manual')return{kind:'manual',reason:'无自动接口，发布后回填链接',short:'无自动接口'};
+      const miss=missingOf(a,p);
+      if(miss.length)return{kind:'manual',reason:'缺'+miss.map(k=>elemLabel[k]||k).join('、')+'，无法自动发布',short:'缺'+miss.map(k=>elemLabel[k]||k).join('、')};
+      if(p.mode==='api'&&!credsReady(p))return{kind:'manual',reason:'待配凭据：需要 AppID/AppSecret',short:'待配凭据'};
+      if(p.mode==='browser'&&!isLogged(p.id))return{kind:'manual',reason:'该平台未登录',short:'未登录'};
+      return{kind:'auto',reason:p.mode==='api'?'写入公众号草稿箱':'浏览器自动化创建',short:''};
     };
-    let loginTimer=null;
-    const paintLogin=d=>{
-      const rows=$('#login-rows');if(rows)rows.innerHTML=loginRows(d);
-      const msg=$('#login-msg');if(msg)msg.textContent=loginSummary(d);
+    const pairsNow=()=>{
+      const out=[];
+      approved.filter(a=>picked.has(a.id)).forEach(a=>
+        LIVE.caps.filter(p=>plats.has(p.id)).forEach(p=>out.push({a,p,act:pairAction(a,p)})));
+      return out;
+    };
+    const incompleteTitle=t=>/^\s*(待填写|补充问题)/.test(t)||(t.length>34&&!/[。？?！!）)]$/.test(t));
+    const sourceLabel=a=>a.source==='manual'?'直接创建':'来自诊断';
+
+    // ---- ① 准入条 ----
+    const gateCounts=()=>{
+      const ps=LIVE.caps;
+      return {
+        ready:ps.filter(p=>platState(p).tone==='good').length,
+        login:ps.filter(p=>p.mode==='browser'&&!isLogged(p.id)).length,
+        creds:ps.filter(p=>p.mode==='api'&&!credsReady(p)).length,
+        manual:ps.filter(p=>p.mode==='manual').length,
+      };
+    };
+    const paintGate=()=>{
+      const c=gateCounts(),s=LIVE.loginState.session||{};
+      const note=s.active?'登录窗口已打开，正在自动识别登录态（每 3 秒刷新，不用手动点）…'
+        :c.ready?'有 '+c.ready+' 个平台可以直接发布。':'现在没有平台能直发。先登录，或先配公众号凭据。';
+      const el=$('#gate');if(!el)return;
+      el.innerHTML=`<section class="gate" aria-labelledby="gate-h">
+        <h2 class="sr-only" id="gate-h">发布环境准入</h2>
+        <div class="gate-top">
+          <ul class="gate-facts">
+            <li><span>可直发</span><strong class="${c.ready?'good':'warn'}">${c.ready}/${LIVE.caps.length}</strong></li>
+            <li><span>需登录</span><strong>${c.login}</strong></li>
+            <li><span>待配凭据</span><strong>${c.creds}</strong></li>
+            <li><span>无自动接口</span><strong>${c.manual}</strong></li>
+          </ul>
+          <div class="toolbar" style="margin:0">
+            <button id="probe-login">重新检测</button>
+            <button id="login" class="primary">打开登录窗口</button>
+          </div>
+        </div>
+        <p class="gate-note">${esc(note)}</p>
+        <details class="gate-details">
+          <summary>平台明细（登录态、凭据、必需内容要素）</summary>
+          <div class="table-scroll"><table>
+            <thead><tr><th>平台</th><th>执行方式</th><th>当前状态</th><th>必需内容要素</th><th>操作</th></tr></thead>
+            <tbody id="login-rows"></tbody>
+          </table></div>
+        </details>
+      </section>`;
+      paintLoginTable();
+      $('#login').onclick=()=>openLogin(LIVE.caps.filter(p=>p.mode==='browser').map(p=>p.id));
+      $('#probe-login').onclick=async()=>{try{
+        const d=await api('/api/platforms/login-state/probe','POST',{platforms:LIVE.caps.filter(p=>p.mode==='browser').map(p=>p.id)});
+        if(token!==epoch)return;LIVE.loginState=d;paintGate();paintChips();paintBar();
+        const s=d.summary||{};notice(`重新检测完成：已登录 ${s.logged_in||0}，需登录 ${s.needs_login||0}，未检测 ${s.unknown||0}`);
+      }catch(err){notice(err.message);}};
+    };
+    const paintLoginTable=()=>{
+      const tb=$('#login-rows');if(!tb)return;
+      tb.innerHTML=LIVE.caps.map(p=>{
+        const st=platState(p),s=lState(p.id);
+        const detail=p.mode==='api'?(credsReady(p)?'凭据已配置；发布时校验权限与 IP 白名单':'未配置 '+p.credentials.map(c=>c.name).join('、'))
+          :p.mode==='browser'?esc(s.note||'还没有检测过登录态'):'该平台没有自动发布接口';
+        const op=p.mode==='api'?`<button class="btn-quiet" data-cred="${p.id}">${credsReady(p)?'修改凭据':'填写凭据'}</button> <button class="btn-quiet" data-checkcred="${p.id}">校验</button>`
+          :p.mode==='browser'?`<button class="btn-quiet" data-login-one="${p.id}">只开这一个</button>`:'—';
+        return `<tr><td>${esc(p.label)}</td><td>${esc(p.mode_label)}</td>
+          <td><span class="chip ${st.tone}">${esc(st.text)}</span></td>
+          <td class="muted">${(p.requires||[]).map(r=>esc(elemLabel[r]||r)).join('、')}</td>
+          <td class="muted">${detail}</td><td>${op}</td></tr>`;
+      }).join('');
       document.querySelectorAll('[data-login-one]').forEach(b=>b.onclick=()=>openLogin([b.dataset.loginOne]));
+      document.querySelectorAll('[data-cred]').forEach(b=>b.onclick=()=>modal('配置公众号凭据',
+        '<p class="muted">只保存在本机数据库，接口不会回显明文。需要该公众号已认证并开通草稿接口权限，且本机公网 IP 在白名单内。</p><label>AppID<input name="appid" required placeholder="wx 开头的 AppID"></label><label>AppSecret<input name="secret" type="password" required></label>',
+        async f=>{const r=await api('/api/platforms/'+b.dataset.cred+'/credentials','PUT',Object.fromEntries(f));
+          const d=await api('/api/platforms');LIVE.caps=d.publication;paintGate();paintChips();paintBar();notice(r.message);},'保存'));
+      document.querySelectorAll('[data-checkcred]').forEach(b=>b.onclick=async()=>{try{
+        const r=await api('/api/platforms/'+b.dataset.checkcred+'/credentials/check','POST',{});notice(r.message||'凭据可用');
+      }catch(err){notice(err.message);}});
+    };
+
+    // ---- ② 页签 ----
+    const paintIndicator=(animate)=>{
+      const box=$('#tabs'),bar=box&&box.querySelector('.tabs-indicator'),cur=box&&box.querySelector('a[aria-current]');
+      if(!box||!bar||!cur)return;
+      const place=()=>{bar.style.width=cur.offsetWidth+'px';bar.style.transform='translateX('+cur.offsetLeft+'px)';};
+      if(!animate){bar.style.transition='none';place();requestAnimationFrame(()=>{bar.style.transition='';});}
+      else place();
+      box.classList.add('has-indicator');bar.classList.add('is-ready');
+      pubTabGeo={w:bar.style.width,t:bar.style.transform};
+    };
+    const renderTabs=()=>{
+      const box=$('#tabs');if(!box)return;
+      box.innerHTML=`
+        <a href="${pubBase}" ${pubTab==='prep'?'aria-current="page"':''}>准备发布 <span class="tabs-count">${approved.length}</span></a>
+        <a href="${pubBase}&tab=history" ${pubTab==='history'?'aria-current="page"':''}>发布记录 <span class="tabs-count">${jobs.length}</span>${jobs.filter(j=>j.status==='manual_required'||j.status==='failed').length?`<span class="tabs-count warn">待处理 ${jobs.filter(j=>j.status==='manual_required'||j.status==='failed').length}</span>`:''}</a>
+        <span class="tabs-indicator" aria-hidden="true"></span>`;
+      const bar=box.querySelector('.tabs-indicator');
+      if(pubTabGeo){ // 先把条摆回上一次的位置，下一帧再动到新位置，才是「滑过去」而不是「从左边缘滑入」
+        bar.style.transition='none';bar.style.width=pubTabGeo.w;bar.style.transform=pubTabGeo.t;
+        bar.classList.add('is-ready');box.classList.add('has-indicator');
+        requestAnimationFrame(()=>{bar.style.transition='';paintIndicator(true);});
+      }else paintIndicator(false);
+    };
+
+    // ---- ③ 准备发布 ----
+    const paintChips=()=>{
+      const el=$('#col-platforms');if(!el)return;
+      LIVE.caps.forEach(p=>{
+        const chip=el.querySelector('[data-platform-chip="'+p.id+'"]');if(!chip)return;
+        const s=platState(p),dot=chip.querySelector('.st'),sr=chip.querySelector('.sr-only');
+        if(dot)dot.className='st '+s.tone;
+        if(sr)sr.textContent=s.text;
+        chip.classList.toggle('picked',plats.has(p.id));
+        const cb=chip.querySelector('input');if(cb)cb.checked=plats.has(p.id);
+      });
+    };
+    const paintBar=()=>{
+      const el=$('#submitbar');if(!el)return;
+      const ps=pairsNow(),manual=ps.filter(x=>x.act.kind==='manual');
+      const tally=new Map();manual.forEach(x=>tally.set(x.act.short,(tally.get(x.act.short)||0)+1));
+      const breakdown=[...tally].map(([k,n])=>`${n} 条${k}`).join('、');
+      const aN=approved.filter(a=>picked.has(a.id)).length,pN=plats.size;
+      const head=ps.length
+        ? `已选 <strong>${aN}</strong> 篇 × <strong>${pN}</strong> 个平台 = <strong>${ps.length}</strong> 条发布<span class="dot"> · </span>${manual.length?`其中 <strong>${manual.length}</strong> 条会转人工`:'<strong class="good">全部可以直发</strong>'}${breakdown?`<span class="dot"> · </span><span style="font-size:var(--fs-note)">${esc(breakdown)}</span>`:''}`
+        :aN&&!pN?`已选 <strong>${aN}</strong> 篇内容，还没选平台。`
+        :pN&&!aN?`已选 <strong>${pN}</strong> 个平台，还没选内容。`
+        :'还没有选内容或平台。';
+      el.innerHTML=`<p class="submit-facts" style="margin:0">${head}</p>
+        <button class="primary" id="publish" ${ps.length?'':'disabled'}>${ps.length?`发布 ${ps.length} 条`:'发布'}</button>`;
+      $('#live').textContent=ps.length
+        ?`已选 ${aN} 篇内容、${pN} 个平台，共 ${ps.length} 条发布，其中 ${manual.length} 条转人工。${breakdown}。`
+        :'还没有选内容或平台。';
+      $('#publish').onclick=()=>{
+        const snap=pairsNow();if(!snap.length)return;
+        const platN=new Set(snap.map(x=>x.p.id)).size;
+        const manualN=snap.filter(x=>x.act.kind==='manual').length,autoN=snap.length-manualN;
+        const buckets=new Map();
+        snap.forEach(x=>{const k=x.act.kind+'|'+x.act.reason;
+          const g=buckets.get(k)||{kind:x.act.kind,reason:x.act.reason,plats:new Set(),n:0};
+          g.plats.add(x.p.label);g.n+=1;buckets.set(k,g);});
+        const rows=[...buckets.values()].map(g=>`<tr><td>${[...g.plats].map(esc).join('、')}</td><td>${g.n} 篇</td>
+          <td><span class="badge ${g.kind==='auto'?'good':'warn'}">${g.kind==='auto'?'直接发布':'转人工'}</span></td>
+          <td class="muted">${esc(g.reason)}</td></tr>`).join('');
+        modal(`发布 ${snap.length} 条到 ${platN} 个平台`,
+          `<p class="muted" style="margin:0">确认后立即执行，不会再问第二次。</p>
+           <p style="margin:16px 0 12px;font-size:14px"><strong>${autoN}</strong> 条直接执行，<strong>${manualN}</strong> 条转人工。</p>
+           <div class="table-scroll"><table><thead><tr><th>平台</th><th>篇数</th><th>结果</th><th>原因</th></tr></thead><tbody>${rows}</tbody></table></div>
+           ${manualN?'<p class="muted" style="margin-top:18px">转人工的条目不会自动发出去，需要你到对应平台手动完成，再回来回填链接。</p>':''}
+           <label class="check" style="margin-top:18px"><input type="checkbox" required>内容已审核，同意按上述方式发布</label>`,
+          async()=>{
+            const now=pairsNow();
+            const sig=l=>l.map(x=>`${x.a.id}|${x.p.id}|${x.act.kind}|${x.act.reason}`).join(';');
+            if(sig(now)!==sig(snap)){ // 弹窗开着的时候登录态可能刚刷新，方案已过期就不发
+              return {message:now.length!==snap.length?`选中范围变了（开弹窗时 ${snap.length} 条，现在 ${now.length} 条）。本次没有发布，请再看一遍。`
+                :'平台状态在确认期间刷新了，结果和弹窗里看到的不一样。本次没有发布，请再看一遍。'};
+            }
+            const r=await api(base+'/publish','POST',{asset_ids:[...picked],platforms:[...plats],confirm:true,operator:''});
+            const ok=r.results.filter(x=>['draft_created','submitted'].includes(x.status)).length;
+            const man=r.results.filter(x=>x.status==='manual_required').length;
+            const bad=r.results.filter(x=>x.status==='failed').length;
+            return {message:`已执行 ${r.results.length} 条：成功 ${ok} 条，转人工 ${man} 条，失败 ${bad} 条。到「发布记录」看每一条的结果。`};
+          },'发布 '+snap.length+' 条');
+      };
+    };
+    const renderPrep=()=>{
+      $('#pane').innerHTML=`
+      <div class="prep-grid">
+        <section class="pick-col" id="col-assets" aria-labelledby="pick-assets-h">
+          <div class="pick-head">
+            <h2 id="pick-assets-h">内容 <span class="tabs-count" id="assets-count">${picked.size} 篇已选</span></h2>
+            <div class="pick-head-right">
+              <label class="check"><input type="checkbox" id="all-assets">全选</label>
+              <button type="button" class="linkish" id="clear-assets">清空</button>
+            </div>
+          </div>
+          <div class="pick-list">${approved.map(a=>`
+            <div class="pick-row" data-asset-row="${a.id}">
+              <input type="checkbox" name="pick-asset" id="asset-${a.id}" value="${a.id}" ${picked.has(a.id)?'checked':''}>
+              <div>
+                <label class="pick-title" for="asset-${a.id}" title="${esc(a.title)}">${esc(a.title)}</label>
+                <p class="pick-meta"><span>${esc(sourceLabel(a))}</span><span class="dot">·</span><span>v${a.revision}</span><span class="dot">·</span><span>${esc(localTime(a.updated_at).slice(0,10))}</span>
+                  ${incompleteTitle(a.title)?'<span class="chip bad">标题没写完</span>':''}</p>
+              </div>
+              <button type="button" class="btn-quiet" data-preview="${a.id}">预览</button>
+            </div>`).join('')}</div>
+          ${drafts.length?`<p class="pick-list-tail">另有 ${drafts.length} 篇未审核，审核后才能发。</p>`:''}
+        </section>
+        <section class="pick-col" id="col-platforms" aria-labelledby="pick-platforms-h">
+          <div class="pick-head">
+            <h2 id="pick-platforms-h">平台 <span class="tabs-count" id="platforms-count">${plats.size} 个已选</span></h2>
+            <div class="pick-head-right">
+              <label class="check"><input type="checkbox" id="all-platforms">全选</label>
+              <button type="button" class="linkish" id="clear-platforms">清空</button>
+            </div>
+          </div>
+          <div class="chips">${LIVE.caps.map(p=>{const s=platState(p);return `
+            <label class="pick-chip" data-platform-chip="${p.id}">
+              <input type="checkbox" name="pick-platform" value="${p.id}" ${plats.has(p.id)?'checked':''}>
+              ${esc(p.label)}<span class="st ${s.tone}" aria-hidden="true"></span><span class="sr-only">${esc(s.text)}</span>
+            </label>`;}).join('')}</div>
+          <p class="chip-legend"><span><i></i>可直发</span><span><i class="warn"></i>需登录或配凭据</span><span><i class="grey"></i>无自动接口</span></p>
+          <p class="chip-note">红点不表示平台坏了，是「现在还不能自动发」。<strong>小红书需要封面图，当前还没有封面图字段，所以它一定会转人工。</strong></p>
+        </section>
+      </div>
+      <div class="submit-bar" id="submitbar"></div>`;
+      if(!approved.length) $('#col-assets .pick-list').innerHTML='<p class="pick-list-tail">还没有已审核内容。到「内容生产」写完并审核后再来。</p>';
+      const sync=()=>{
+        approved.forEach(a=>{const b=$('#asset-'+a.id);if(b)b.checked=picked.has(a.id);});
+        LIVE.caps.forEach(p=>{const b=$('#col-platforms input[value="'+p.id+'"]');if(b)b.checked=plats.has(p.id);});
+      };
+      $('#all-assets').onchange=e=>{approved.forEach(a=>e.target.checked?picked.add(a.id):picked.delete(a.id));keep();sync();paintAll();};
+      $('#clear-assets').onclick=()=>{picked.clear();keep();sync();paintAll();};
+      $('#all-platforms').onchange=e=>{LIVE.caps.forEach(p=>e.target.checked?plats.add(p.id):plats.delete(p.id));keep();sync();paintAll();};
+      $('#clear-platforms').onclick=()=>{plats.clear();keep();sync();paintAll();};
+      $('#col-assets').addEventListener('change',e=>{if(e.target.name!=='pick-asset')return;
+        e.target.checked?picked.add(e.target.value):picked.delete(e.target.value);keep();paintAll();});
+      $('#col-platforms').addEventListener('change',e=>{if(e.target.name!=='pick-platform')return;
+        e.target.checked?plats.add(e.target.value):plats.delete(e.target.value);keep();paintAll();});
+      document.querySelectorAll('[data-preview]').forEach(b=>b.onclick=()=>{
+        const a=assets.find(x=>x.id===b.dataset.preview);
+        modal('内容预览',
+          `<p class="muted" style="margin:0 0 14px">${esc(sourceLabel(a))} · v${a.revision} · 最后修改 ${esc(localTime(a.updated_at))} · ${a.facts?'已填事实依据':'未填事实依据'} · ${a.status==='approved'?'已审核':'未审核'}</p>
+           ${incompleteTitle(a.title)?'<p class="gate-note" style="margin:0 0 14px;color:var(--notice-ink)">标题看起来还没写完。发出去标题就是这个。</p>':''}
+           <div class="stage"><div class="stage-body">${md(a.body||'（正文为空）')}</div><p class="stage-status">${esc(a.title.slice(0,60))}</p></div>`,
+          ()=>{},'关闭');
+      });
+      paintAll();
+    };
+    // 勾选态与计数一起刷新。不重建 DOM，键盘焦点不会丢。
+    function paintAll(){
+      document.querySelectorAll('[data-asset-row]').forEach(r=>r.classList.toggle('picked',picked.has(r.dataset.assetRow)));
+      const ac=$('#assets-count'),pc=$('#platforms-count');
+      if(ac)ac.textContent=picked.size+' 篇已选';
+      if(pc)pc.textContent=plats.size+' 个已选';
+      const tri=(box,on,total)=>{if(!box)return;box.checked=total>0&&on===total;box.indeterminate=on>0&&on<total;};
+      tri($('#all-assets'),approved.filter(a=>picked.has(a.id)).length,approved.length);
+      tri($('#all-platforms'),LIVE.caps.filter(p=>plats.has(p.id)).length,LIVE.caps.length);
+      paintBar();
+    }
+
+    // ---- ④ 发布记录 ----
+    const renderHistory=()=>{
+      const open=j=>j.status==='manual_required'||j.status==='failed';
+      const groups=[];
+      jobs.forEach(j=>{const g=groups.find(x=>x.title===j.title_snapshot);
+        g?g.items.push(j):groups.push({title:j.title_snapshot,items:[j]});});
+      const nOpen=jobs.filter(open).length;
+      $('#pane').innerHTML=`<section class="pick-col" style="margin-bottom:var(--sp-6)">
+        <div class="rec-head">
+          <div><h2>发布记录</h2><p>每条内容 × 平台的结果与原因，按内容分组。待处理 ${nOpen} 条。</p></div>
+        </div>
+        ${groups.map(g=>`<div class="rec-group">
+          <div class="rec-group-title"><strong>${esc(g.title)}</strong><span class="muted" style="font-size:var(--fs-meta)">${g.items.length} 个平台</span></div>
+          ${g.items.map(j=>{const s=status4[j.status]||[j.status,''];const p=platById(j.platform);
+            return `<div class="rec-item">
+              <div class="rec-item-main"><span class="badge ${s[1]}">${esc(s[0])}</span> <strong style="font-size:var(--fs-note)">${esc(p?p.label:j.platform)}</strong>
+                ${j.adapter_note?`<small>${esc(j.adapter_note)}</small>`:''}
+                ${j.receipt_url?`<small><a href="${esc(j.receipt_url)}">${esc(j.receipt_url)}</a></small>`:''}
+                <small>v${j.asset_revision} · ${esc(localTime(j.updated_at))}${j.operator?' · '+esc(j.operator):''}</small></div>
+              <div>${open(j)?`<button type="button" class="btn-quiet" data-receipt="${j.id}">回填链接</button>`:''}</div>
+            </div>`;}).join('')}
+        </div>`).join('')||'<p class="empty-block">还没有发布记录。到「准备发布」勾选内容和平台。</p>'}</section>`;
+      document.querySelectorAll('[data-receipt]').forEach(b=>b.onclick=()=>modal('回填发布链接',
+        '<p class="muted">先去该平台完成发布，再把页面链接回填到这里。</p><label>发布链接<input name="url" type="url" required placeholder="https://"></label><label>操作人<input name="operator" required></label><label class="check"><input type="checkbox" required>确认已实际发布</label>',
+        f=>api(base+'/publishing/'+b.dataset.receipt+'/receipt','POST',{...Object.fromEntries(f),confirm:true}),'保存回执'));
+    };
+
+    // ---- 登录窗口与轮询 ----
+    let loginTimer=null;
+    const openLogin=async ids=>{
+      if(loginTimer){clearTimeout(loginTimer);loginTimer=null;}
+      try{
+        const d=await api('/api/platforms/login','POST',{platforms:ids});
+        if(token!==epoch)return;LIVE.loginState=d;paintGate();paintChips();paintBar();
+        notice(d.message||'已打开登录窗口');
+      }catch(err){notice(err.message);return;}
+      loginTimer=setTimeout(watchLogin,2000);
     };
     const watchLogin=async()=>{
       if(token!==epoch)return;
       try{
         const d=await api('/api/platforms/login-state');if(token!==epoch)return;
-        const flipped=Object.keys(d.states||{}).filter(k=>d.states[k].state==='logged_in'&&known[k]!==undefined&&known[k]!=='logged_in');
-        Object.keys(d.states||{}).forEach(k=>{known[k]=d.states[k].state;});
-        paintLogin(d);
+        const before=LIVE.loginState.states||{};
+        const flipped=Object.keys(d.states||{}).filter(k=>d.states[k].state==='logged_in'&&before[k]&&before[k].state!=='logged_in');
+        LIVE.loginState=d;paintGate();paintChips();paintBar();
         const s=d.session||{};
-        if(flipped.length)notice(`已识别登录成功：${flipped.map(k=>(names[k]||{}).label||k).join('、')}`);
+        if(flipped.length)notice('已识别登录成功：'+flipped.map(k=>(platById(k)||{}).label||k).join('、'));
         else if(!s.active&&s.result==='completed'&&s.message)notice(s.message);
         loginTimer=s.active?setTimeout(watchLogin,3000):null;
-      }catch(e){loginTimer=setTimeout(watchLogin,5000);}
+      }catch(err){loginTimer=setTimeout(watchLogin,5000);}
     };
-    const openLogin=async ids=>{
-      if(loginTimer){clearTimeout(loginTimer);loginTimer=null;}
-      try{const d=await api('/api/platforms/login','POST',{platforms:ids});if(token!==epoch)return;paintLogin(d);notice(d.message||'已打开登录窗口');}catch(e){notice(e.message);return;}
-      loginTimer=setTimeout(watchLogin,2000);
-    };
-    paintLogin(loginState);
-    $('#login').onclick=()=>openLogin(browserIds);
-    $('#probe-login').onclick=async()=>{try{const d=await api('/api/platforms/login-state/probe','POST',{platforms:browserIds});if(token!==epoch)return;paintLogin(d);const s=d.summary||{};notice(`重新检测完成：已登录 ${s.logged_in||0}，需登录 ${s.needs_login||0}，未检测 ${s.unknown||0}`);}catch(e){notice(e.message);}};
-    document.querySelectorAll('[data-login]').forEach(el=>el.onclick=e=>{e.preventDefault();openLogin(browserIds);});
-    if((loginState.session||{}).active)loginTimer=setTimeout(watchLogin,2000);
-    document.querySelectorAll('[data-cred]').forEach(b=>b.onclick=()=>modal('配置公众号凭据','<p class="muted">只保存在本机数据库，接口不会回显明文。需要该公众号已认证并开通草稿接口权限，且本机公网 IP 在白名单内。</p><label>AppID<input name="appid" required placeholder="wx开头的 AppID"></label><label>AppSecret<input name="secret" type="password" required></label>',async f=>{const r=await api('/api/platforms/'+b.dataset.cred+'/credentials','PUT',Object.fromEntries(f));notice(r.message);},'保存'));
-    document.querySelectorAll('[data-checkcred]').forEach(b=>b.onclick=async()=>{try{const r=await api('/api/platforms/'+b.dataset.checkcred+'/credentials/check','POST',{});notice(r.message||'凭据可用');}catch(e){notice(e.message);}});
-    document.querySelectorAll('[data-receipt]').forEach(b=>b.onclick=()=>modal('回填发布链接','<p class="muted">先去该平台完成发布，再把页面链接回填到这里。</p><label>发布链接<input name="url" type="url" required></label><label>操作人<input name="operator" required></label><label class="check"><input type="checkbox" required>确认已实际发布</label>',f=>api(base+'/publishing/'+b.dataset.receipt+'/receipt','POST',{...Object.fromEntries(f),confirm:true}),'保存回执'));
+
+    // ---- 装配 ----
+    $('#module').innerHTML='<div id="gate"></div><div id="tabs" class="tabs"></div><div id="pane"></div>';
+    paintGate();
+    renderTabs();
+    if(pubTab==='history')renderHistory();else renderPrep();
+    if((LIVE.loginState.session||{}).active)loginTimer=setTimeout(watchLogin,2000);
    }
   }
  } else if(view==='platforms') {
