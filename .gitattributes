@@ -1,0 +1,8 @@
+# 统一用 LF 行尾。
+# 起因：用 Python 的 write_text/read_text 改文件时，Windows 会把整个文件改成 CRLF，
+# 一次 CSS 小改动就制造了 1500 行幽灵 diff。这里把规则写死，别再靠自觉。
+* text=auto eol=lf
+*.woff2 binary
+*.png binary
+*.ico binary
+*.db binary
