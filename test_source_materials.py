@@ -378,7 +378,12 @@ class MaterialApiTests(APITests):
         slug, base, aid = self.asset()
         self.client.post(base + '/content/' + aid + '/sources/note',
                          json={'text': '本系统支持设备台账、点检、预测性维护与备件管理。\n'
-                                       '已通过 ISO 9001 认证，标准交付周期为 8 周。', 'label': '产品说明'})
+                                       '已通过 ISO 9001 认证，标准交付周期为 8 周。\n'
+                                       '实施配置包含数据治理与接口集成，交付后提供用户培训。\n'
+                                       '设备台账反映设备当前状态，支持标签打印与批量导入。\n'
+                                       '点检与保养计划可按设备类别下发，并保留执行记录。\n'
+                                       '备件管理支持安全库存预警与出入库台账。',
+                               'label': '产品说明'})
         out = self.client.post(base + '/content/' + aid + '/generate',
                               json={'revision': 1, 'channel': '公众号长文', 'audience': '制造企业',
                                     'objective': '帮助选型'})

@@ -751,3 +751,9 @@ label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:p
   padding:var(--sp-4);border:1px solid var(--line);border-radius:8px;background:var(--bg);max-height:560px;overflow:auto}
 .draft-sources{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--fs-meta);color:var(--muted-ink);
   padding:var(--sp-3);border-left:3px solid var(--line-strong);background:var(--bg)}
+
+/* 生成说明 / 生成警告：明确不属于正文，与稿件正文视觉分离 */
+.gen-notes{list-style:none;margin:var(--sp-2) 0 0;padding:0;font-size:var(--fs-meta);color:var(--muted-ink)}
+.gen-notes li{position:relative;padding:5px 0 5px 16px;line-height:1.65;overflow-wrap:anywhere}
+.gen-notes li::before{content:"·";position:absolute;left:4px;color:var(--faint)}
+.gen-notes.warn li::before{content:"△";color:var(--orange)}

@@ -91,11 +91,13 @@ class EditorialTests(APITests):
         # 占位符未补齐不能过审
         r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':1,'confirm':True})
         self.assertEqual(r.status_code,409); self.assertIn('待补充',r.json()['detail'])
-        # 生成初稿：未配置内容模型时使用本地证据安全稿
+        # 生成：未配置内容模型时用本地引擎（产出素材整理稿，不是成稿）
         out=self.client.post(base+'/content/'+aid+'/generate',json={
-            'revision':1,'facts':FACTS,'channel':'公众号长文','audience':'制造企业负责人','objective':'帮助读者建立可核验的选型框架'})
+            'revision':1,'facts':FACTS,'channel':'小红书','audience':'制造企业负责人','objective':'帮助读者建立可核验的选型框架'})
         self.assertEqual(out.status_code,200)
         self.assertEqual(out.json()['engine'],'local-safe'); self.assertEqual(out.json()['revision'],2)
+        # 生成说明必须与正文分开，并明说本地引擎只做整理、不写成稿
+        self.assertTrue(any('只做素材整理' in n for n in out.json()['notes']), out.json()['notes'])
         asset=self._asset(base,aid)
         self.assertNotIn('（待补充',asset['body'])
         self.assertNotEqual(asset['generation_meta_json'],'{}')

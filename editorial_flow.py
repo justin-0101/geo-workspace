@@ -318,6 +318,7 @@ def generate_asset(slug,identity,revision,confirm_overwrite=False,**values):
     meta={key:result.get(key) for key in ('engine','model','generated_at','warnings')}
     meta['material_ids']=[item['id'] for item in bundle['materials']]
     meta['material_chars']=len(bundle['materials_text'])
+    meta['notes']=list(result.get('notes') or [])
     waiting=materials.pending_count(slug,identity)
     if waiting:
         meta['warnings']=list(meta['warnings'])+[f'还有 {waiting} 个素材在 OCR 识别中，本次生成没有用到它们；识别完成后可重新生成。']
@@ -337,7 +338,7 @@ def generate_asset(slug,identity,revision,confirm_overwrite=False,**values):
             c.execute("UPDATE improvement_items SET status='doing' WHERE id=?",(current['action_id'],))
         store.record_event(c,slug,'content_generated',f"使用 {meta['engine']} 生成内容草稿")
     return {'id':identity,'revision':revision+1,'engine':meta['engine'],'model':meta['model'],
-            'warnings':meta['warnings'],'quality':quality,'title':candidate['title']}
+            'warnings':meta['warnings'],'notes':meta['notes'],'quality':quality,'title':candidate['title']}
 
 
 def review_asset(slug,identity,revision,reviewer,confirmed):

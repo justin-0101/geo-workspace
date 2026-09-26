@@ -1,8 +1,10 @@
 """Evidence-aware content generation and quality gates.
 
-The built-in generator deliberately writes only decision guidance and facts supplied by the
-project owner. An optional OpenAI-compatible endpoint can produce a richer draft, but it is
-bound by the same source bundle and quality checks.
+The built-in generator writes a **structured material digest** (素材整理稿) — grouped,
+collapsed, reader-facing — and never marketing prose: it cannot write a publishable
+article. An optional OpenAI-compatible endpoint produces the real draft. Both are bound
+by the same source bundle and quality checks, and no operator-facing text (briefs,
+to-do lists, "待确认" notes) is allowed into the body.
 """
 from datetime import datetime, timezone
 import json
@@ -22,6 +24,34 @@ FACT_HINTS = re.compile(
     r'团队|规模|经验|实施|验收|指标|型号|版本|协议|ISO|GB|CMMI|AAA)')
 FACT_NOISE = re.compile(r'^(首页|登录|注册|下一篇|上一篇|更多|分享|收藏|评论|点赞|关注|'
                         r'Copyright|©|版权所有|免责声明|广告|相关推荐|热门|导航)')
+
+#: 表格类素材（功能清单/参数表）的判定与处理
+CELL_SPLIT = re.compile(r'\s*[|｜\t]\s*')
+NUMERIC_CELL = re.compile(r'^\d+(\.\d+)?$')
+#: 说明列里大量同模板句：前 N 字相同就当成同一类，合并成一条 + 计数
+COLLAPSE_PREFIX = 18
+
+#: 本地引擎的产出边界：它是整理，不是成稿。
+def _local_engine_note():
+    return ('本地引擎只做素材整理，不写营销文案。要可直接发布的成稿，'
+            '请配置 GEO_CONTENT_LLM_BASE_URL / GEO_CONTENT_LLM_MODEL 后再生成。')
+
+
+#: 面向操作员的括号注释（来源行里会有），不能出现在正文里
+OPERATOR_PAREN_RE = re.compile(r'（[^（）]*(?:待人工确认|待确认|已录入|已提取|已抓取|待核实)[^（）]*）')
+#: 正文里绝对不该出现的操作员用语。测试用它守门。
+OPERATOR_PHRASES = ('本文的目标是', '这篇内容讨论', '发布前仍需', '建议的下一步',
+                    '待人工确认', '本地引擎', '写作任务书', '请配置 GEO_CONTENT')
+
+
+def _clean_source_lines(facts):
+    """给正文用的来源行：去掉“（已提取 N 字，待人工确认）”这类操作员注释。"""
+    lines = []
+    for raw in str(facts or '').splitlines():
+        line = OPERATOR_PAREN_RE.sub('', raw).strip()
+        if line:
+            lines.append(line)
+    return lines
 
 
 def candidate_facts(materials, limit=14, max_len=200):
@@ -46,6 +76,137 @@ def candidate_facts(materials, limit=14, max_len=200):
             if len(picked) >= limit:
                 return picked
     return picked
+
+
+def _collapse(lines, limit=None):
+    """同前缀合并：表格说明列常见「支持用户发起流程或通过数据接口获取和查看X信息。」这类模板句。
+
+    返回 [{'text': 代表句, 'count': 同类条数}]。
+    """
+    merged, order = {}, []
+    for raw in lines:
+        line = str(raw).strip()
+        if len(line) < 4 or FACT_NOISE.match(line):
+            continue
+        key = line[:COLLAPSE_PREFIX]
+        if key in merged:
+            merged[key]['count'] += 1
+            continue
+        merged[key] = {'text': line, 'count': 1}
+        order.append(key)
+        if limit and len(order) >= limit:
+            break
+    return [merged[key] for key in order]
+
+
+def _material_lines(materials):
+    lines = []
+    for material in materials or []:
+        for raw in str(material.get('excerpt') or '').split('\n'):
+            line = str(raw).strip()
+            if line:
+                lines.append(line)
+    return lines
+
+
+def _looks_tabular(materials):
+    lines = _material_lines(materials)
+    if len(lines) < 8:
+        return False
+    rows = sum(1 for line in lines if len(CELL_SPLIT.split(line)) >= 3)
+    return rows / len(lines) >= 0.35
+
+
+def _collapse_items(items, limit=None):
+    """按说明列前缀合并同类项，并把它们各自的功能名收在一起。"""
+    merged, order = {}, []
+    for item in items:
+        detail = str(item.get('detail') or '').strip()
+        if len(detail) < 4 or FACT_NOISE.match(detail):
+            continue
+        key = detail[:COLLAPSE_PREFIX]
+        if key not in merged:
+            merged[key] = {'detail': detail, 'labels': [], 'count': 0}
+            order.append(key)
+        entry = merged[key]
+        entry['count'] += 1
+        label = str(item.get('label') or '').strip()
+        if label and label not in entry['labels']:
+            entry['labels'].append(label)
+    return [merged[key] for key in order[:limit] if limit] or [merged[key] for key in order]
+
+
+def _detail_and_label(row, group_index, group_name):
+    """从一行里取「功能名」与「说明」：说明取最后一个长单元格，功能名取它前面最近的那个。"""
+    usable = [(pos, cell) for pos, cell in enumerate(row)
+              if cell and not NUMERIC_CELL.match(cell)]
+    usable = [(pos, cell) for pos, cell in usable if pos != group_index]
+    if not usable:
+        return '', ''
+    detail_pos, detail = max(usable, key=lambda pair: (len(pair[1]), pair[0]))
+    if len(detail) < 6:
+        return '', ''
+    label = ''
+    for pos, cell in usable:
+        if pos < detail_pos and cell != group_name and len(cell) <= 24:
+            label = cell
+    return label, detail
+
+
+def _group_column(rows, max_groups):
+    """选一个“分类列”：取值不多、不长、不是纯数字的那一列（通常是模块名）。"""
+    width = min(len(row) for row in rows)
+    best, best_score = -1, None
+    for index in range(width):
+        values = [row[index] for row in rows]
+        if any(NUMERIC_CELL.match(v) for v in values):
+            continue
+        distinct = {v for v in values if v}
+        if not 2 <= len(distinct) <= max_groups * 2:
+            continue
+        if max((len(v) for v in distinct), default=0) > 24:
+            continue
+        score = len(values) / len(distinct)          # 平均每组行数，越大越像分类列
+        if best_score is None or score > best_score:
+            best, best_score = index, score
+    return best
+
+
+def material_overview(materials, max_groups=10, samples=4):
+    """把素材整理成「分组 → 代表条目」，而不是逐行堆砌。"""
+    lines = _material_lines(materials)
+    overview = {'rows': len(lines), 'kind': 'text', 'groups': [], 'others': []}
+    if not lines:
+        return overview
+    if _looks_tabular(materials):
+        rows = [CELL_SPLIT.split(line) for line in lines]
+        rows = [[cell.strip() for cell in row] for row in rows if len(row) >= 3]
+        index = _group_column(rows, max_groups)
+        if index >= 0:
+            buckets, order = {}, []
+            for row in rows:
+                name = row[index]
+                if not name or NUMERIC_CELL.match(name):
+                    continue
+                label, detail = _detail_and_label(row, index, name)
+                buckets.setdefault(name, {'name': name, 'count': 0, 'items': []})
+                if name not in order:
+                    order.append(name)
+                buckets[name]['count'] += 1
+                if detail:
+                    buckets[name]['items'].append({'label': label, 'detail': detail})
+            overview['kind'] = 'table'
+            overview['group_column'] = index
+            for name in order[:max_groups]:
+                bucket = buckets[name]
+                overview['groups'].append({
+                    'name': name, 'count': bucket['count'],
+                    'samples': _collapse_items(bucket['items'], limit=samples),
+                })
+            overview['group_total'] = len(order)
+            return overview
+    overview['others'] = _collapse(lines, limit=16)
+    return overview
 
 
 def now():
@@ -141,8 +302,8 @@ def capability():
         'configured': configured,
         'model': model if configured else '',
         'auth_configured': bool(key),
-        'message': ('已配置 OpenAI 兼容内容模型' if configured else
-                    '未配置内容模型，将使用本地证据安全稿生成器'),
+        'message': ('已配置内容模型：生成可编辑的初稿（仍需人工核对与审核）' if configured else
+                    '未配置内容模型：只能生成素材整理稿（分组摘录），不能成稿；配置 GEO_CONTENT_LLM_BASE_URL 与 GEO_CONTENT_LLM_MODEL 后可生成初稿'),
     }
 
 
@@ -228,57 +389,111 @@ def _section_library(question_id, question):
     ]
 
 
+def _template_for(asset, bundle):
+    """按写作目标/问题选模板。产品介绍与“怎么选”是两类不同的文章，不能共用一套骨架。"""
+    haystack = ' '.join(_text(asset.get(key)) for key in ('objective', 'brief', 'title', 'keywords'))
+    haystack += ' ' + _text(bundle.get('question'))
+    if re.search(r'功能|模块|介绍|产品|能做什么|能力|方案说明|系统概述', haystack):
+        return 'product'
+    qid = _text(bundle.get('question_id')).upper()
+    return qid if qid in {'Q01', 'Q02', 'Q03', 'Q04', 'Q05'} else 'generic'
+
+
+def _group_label(value):
+    return {'Q01': '选型', 'Q02': '预算', 'Q03': '核验', 'Q04': '风险', 'Q05': '自建与委托'}.get(value, value)
+
+
+def _material_section(overview, facts):
+    """素材部分：按分组写，表格类用分组+合并同类项，其他用折叠后的条目。
+
+    产品介绍与「怎么选」两类文章都需要它：后者同样要用自己主体的事实来支撑判断。
+    """
+    parts = []
+    groups = overview.get('groups') or []
+    total = overview.get('rows') or 0
+    if groups:
+        names = '、'.join(group['name'] for group in groups)
+        total_groups = overview.get('group_total', len(groups))
+        lead = (f'素材中共 {total} 条功能记录，分为 {total_groups} 个模块：{names}。'
+                if total_groups <= len(groups) else
+                f'素材中共 {total} 条功能记录，可归入 {total_groups} 个模块，主要包括：{names}。')
+        parts.append(lead + '以下按模块列出可核对的功能条目。')
+        for group in groups:
+            bullets = []
+            for item in group['samples']:
+                labels = item['labels']
+                if item['count'] > 1 and len(labels) > 1:
+                    shown = '、'.join(labels[:6])
+                    bullets.append(f'- {item["detail"]}（适用于：{shown} 共 {item["count"]} 项）')
+                elif labels and labels[0] not in item['detail']:
+                    bullets.append(f'- {labels[0]}：{item["detail"]}')
+                else:
+                    bullets.append(f'- {item["detail"]}')
+            parts.extend([f'### {group["name"]}（{group["count"]} 条）',
+                          '\n'.join(bullets) if bullets else '- 这个模块素材里没有可引用的说明'])
+    else:
+        others = overview.get('others') or []
+        if others:
+            parts.append('素材里可直接引用的条目：')
+            parts.append('\n'.join(
+                f'- {item["text"]}' + (f'（同类 {item["count"]} 条）' if item['count'] > 1 else '')
+                for item in others))
+    lines = _clean_source_lines(facts)
+    if lines:
+        parts.extend(['## 内容依据', '\n'.join(f'- {line}' for line in lines[:8])])
+    if not parts:
+        parts.append('## 内容依据')
+        parts.append('本稿没有素材依据（本次没有上传附件、网址或粘贴文本），不能作为发布内容。')
+    return parts
+
+
+def _advice_body(kind, asset, bundle, overview, facts):
+    """选型/预算/核验类：面向读者的判断方法 + 自己主体可核对的事实。"""
+    profile = bundle.get('profile') or {}
+    business = _text(profile.get('business')) or '相关方案'
+    audience = _text(asset.get('audience')) or _text(profile.get('audience')) or '正在评估方案的负责人'
+    parts = [f'面向{audience}，本文讨论{business}在{_group_label(kind) if kind != "generic" else "评估与落地"}'
+             f'环节需要核对什么。下面每一项都可以直接拿去问供应商或写进需求清单。']
+    for heading, paragraph in _section_library(kind if kind != 'generic' else '', bundle.get('question')):
+        parts.extend([f'## {heading}', paragraph])
+    parts.extend(_material_section(overview, facts))
+    return parts
+
+
 def local_generate(asset, bundle):
+    """本地引擎：产出结构化「素材整理稿」，不写营销文案。
+
+    正文里不出现任何面向操作员的文字（写作要求、「待确认」、「下一步」、核验提醒）——
+    那些进 notes，由界面单独展示为「生成说明」。
+    """
     profile = bundle.get('profile') or {}
     title = _title_for(asset, bundle)
-    audience = _text(asset.get('audience')) or _text(profile.get('audience')) or '正在评估相关方案的负责人'
-    objective = _text(asset.get('objective')) or _text(bundle.get('question')) or '帮助读者建立可核验的决策框架'
-    business = _text(profile.get('business')) or '相关产品与服务'
-    region = _text(profile.get('region'))
-    question_id = _text(bundle.get('question_id'))
-    question = _text(bundle.get('question'))
-    sections = _section_library(question_id, question)
-
-    intro = (f'面向{audience}，这篇内容讨论“{question or title}”。判断{business}是否适合，'
-             '不能只看功能名称或宣传口号，而应把需求、证据、实施边界和验收条件放在同一张清单里。'
-             f'本文的目标是：{objective.rstrip("。")}。')
-    if region:
-        intro += f'涉及{region}范围内的服务与交付时，还应结合实际项目地点和服务半径复核。'
-
-    parts = [intro]
-    for heading, paragraph in sections:
-        parts.extend([f'## {heading}', paragraph])
-
-    # 素材里挑出的候选事实：逐字来自上传或抓取的原文，不当成已验证结论。
-    picked = candidate_facts(bundle.get('materials'))
-    parts.append('## 可从素材引用的内容')
-    if picked:
-        parts.append('以下内容逐字来自上面列出的素材，可直接改写进正文；口径、时效和可公开范围仍需人工确认：')
-        parts.extend([f'- {item["text"]}（来自：{item["from"]}）' for item in picked])
-    else:
-        parts.append('当前没有可用的素材（附件、网址或粘贴文本）。发布前应补充官方页面、产品资料或已确认的项目文件。')
-
     facts = _facts_text(asset, bundle)
-    fact_lines = [line.strip() for line in facts.splitlines() if line.strip()]
-    parts.append('## 本项目需要核验的主体信息')
-    if fact_lines:
-        parts.append('以下信息来自素材索引或项目负责人录入的资料，发布前仍需逐条核对其适用范围和时效：')
-        parts.extend([f'- {line}' for line in fact_lines[:12]])
-    else:
-        parts.append('当前没有足够的主体事实来源。发布前应补充官方页面、产品资料、案例证明或项目文件。')
+    overview = material_overview(bundle.get('materials'))
+    kind = _template_for(asset, bundle)
 
-    parts.extend([
-        '## 建议的下一步',
-        '先把候选方案放入同一份核验表，逐项记录“已证实、待核实、不适用”，再安排演示、访谈或试点。涉及报价、交期、效果、资质和客户案例的内容，应以正式材料和双方确认结果为准。',
-        '这套方法的价值不在于快速得出一个品牌结论，而在于减少信息口径不一致、隐性费用和实施边界不清带来的决策风险。',
-    ])
-    body = '\n\n'.join(parts)
-    summary = f'围绕{question or title}，从需求澄清、证据核验、实施边界和验收条件给出一套可执行的判断框架。'
-    warnings = ['本稿由本地安全生成器生成；主体能力、案例、报价和效果仍需人工核验。']
-    if picked:
-        warnings.append(f'已从素材中挑出 {len(picked)} 条候选事实，请核对口径后再写进正文。')
+    if kind == 'product':
+        parts = _material_section(overview, facts)
+        summary = '按素材整理的系统功能与模块清单，逐条可核对。'
+    else:
+        parts = _advice_body(kind, asset, bundle, overview, facts)
+        summary = f'围绕{_text(bundle.get("question")) or title}，列出需要核对的判断维度与依据。'
+    body = '\n\n'.join(part for part in parts if str(part).strip())
+
+    notes = [_local_engine_note()]
+    materials = bundle.get('materials') or []
+    if materials:
+        usable = sum(1 for item in materials if item.get('chars'))
+        notes.append(f'本次读取素材 {len(materials)} 个（可用 {usable} 个）；'
+                     f'从 {overview.get("rows", 0)} 行里整理出 '
+                     f'{overview.get("group_total") or len(overview.get("groups") or [])} 个分组。')
+    else:
+        notes.append('本次没有任何可用素材，正文没有事实依据，无法审核与发布。')
+    notes.append('成稿还需要的材料：一句话产品定位、适用客户与规模、与替代方案的差异、'
+                 '交付周期、报价口径、可公开案例、联系方式。')
+    warnings = ['本稿是素材整理稿，不是可发布的成稿；主体能力、案例、报价和效果仍需人工核验。']
     return {'title': title, 'summary': summary, 'body': body, 'facts': facts,
-            'engine': 'local-safe', 'model': '', 'warnings': warnings}
+            'engine': 'local-safe', 'model': '', 'warnings': warnings, 'notes': notes}
 
 
 def _endpoint(base):
@@ -316,21 +531,33 @@ def openai_generate(asset, bundle):
         'verified_facts': _text(asset.get('facts')),
     }
     system = (
-        '你是企业内容编辑。只根据给定写作任务书和证据包写中文稿件。'
-        '诊断平台回答只用于理解问题，不得当成企业事实。'
-        '证据包里的素材（附件、网页、粘贴文本）是事实来源：可以从中提取并改写企业介绍、产品能力、'
-        '交付方式、指标与案例，但不得超出素材范围添油加醋，不得编造资质、案例、客户、价格、效果或承诺。'
-        '素材不足的部分写成决策方法和核验清单，不要补虚构事实。'
-        '文章要具体、克制、自然，避免营销套话。'
-        '返回严格 JSON，字段仅含 title、summary、body；body 使用 Markdown 二级标题，不要包含一级标题。'
-    )
+        '你是企业内容编辑，为『{channel}』写一篇可发布的中文文章。'
+        '写作任务书里的 objective 是本文要达成的目标，请直接写成读者看的内容，'
+        '绝不要把任务书、写作要求、“待确认”、“下一步”之类面向写作者的话写进正文。'
+        '诊断平台回答只用于理解用户会问什么，不得当成企业事实。'
+        '素材（附件、网页、粘贴文本）是唯一的事实来源：可以从中提取并改写企业介绍、产品能力、'
+        '功能模块、交付方式、指标与案例，但不得超出素材范围，不得编造资质、案例、客户、价格、'
+        '效果或承诺；素材没写的就写决策方法与核验清单，不要补虚构事实。'
+        '结构要求：开头一段直接进入主题（禁止“本文将介绍…”“本文的目标是…”这类套话）；'
+        '正文用 Markdown 二级标题组织，功能/模块类内容可以带三级标题和列表；结尾给可执行的下一步。'
+        '文风：具体、克制、自然，避免“赋能/闭环/降维打击/领先/专业”这类词。'
+        '返回严格 JSON，字段仅含 title、summary、body；body 内不要再出现一级标题。'
+    ).replace('{channel}', _text(asset.get('channel')) or '通用渠道')
     material_text = _text(bundle.get('materials_text'))
     if len(material_text) > 16000:
         material_text = material_text[:16000]
+    overview = material_overview(bundle.get('materials'))
+    skeleton = ''
+    if overview.get('groups'):
+        skeleton = '素材已整理出的模块结构（供参考，不必照抄）：\n' + '\n'.join(
+            f"- {group['name']}（{group['count']} 条）：" +
+            '；'.join(item['detail'][:60] for item in group['samples'][:3])
+            for group in overview['groups'])
     user = ('写作任务书：\n' + json.dumps(brief, ensure_ascii=False) +
-            ('\n\n素材原文（事实来源，逐字抓取或提取）：\n' + material_text if material_text else
+            ('\n\n' + skeleton if skeleton else '') +
+            ('\n\n素材原文（事实来源，逐字抓取或提取，请从中取材）：\n' + material_text if material_text else
              '\n\n素材原文：无（本次没有上传附件、网址或粘贴文本）') +
-            '\n\n诊断与项目背景：\n' +
+            '\n\n诊断与项目背景（仅供参考，不是企业事实）：\n' +
             json.dumps({key: bundle.get(key) for key in
                         ('profile', 'question', 'question_id', 'observations', 'evidence_files')},
                        ensure_ascii=False)[:8000])

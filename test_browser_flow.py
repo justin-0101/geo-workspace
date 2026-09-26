@@ -116,8 +116,10 @@ def main():
                     page.screenshot(path=str(OUT/'content-materials.png'),full_page=True)
                     # 生成后弹框提示完成，并引导到内容库
                     page.locator('#asset-form #generate').click()
-                    expect(page.locator('#modal-title')).to_have_text('初稿已生成')
+                    # 标题取决于引擎：未配模型=素材已整理，配了模型=初稿已生成
+                    expect(page.locator('#modal-title')).to_have_text(re.compile('初稿已生成|素材已整理'))
                     expect(page.locator('#modal-body')).to_contain_text('自动质量检查通过')
+                    expect(page.locator('#modal-body .gen-notes li')).not_to_have_count(0)   # 生成说明在弹框里
                     page.get_by_role('button',name='去内容库查看',exact=True).click()
                     expect(page.get_by_role('heading',name='内容库',exact=True)).to_be_visible()
                     expect(page.locator('.draft-body')).to_contain_text('ISO 9001')
@@ -178,7 +180,7 @@ def main():
                     page.locator('#confirm-modal').click()
                     expect(page.locator('#src-list li[data-source]')).to_have_count(1)
                     page.locator('#asset-form #generate').click()
-                    expect(page.locator('#modal-title')).to_have_text('初稿已生成')
+                    expect(page.locator('#modal-title')).to_have_text(re.compile('初稿已生成|素材已整理'))
                     page.get_by_role('button',name='去内容库查看',exact=True).click()
                     expect(page.locator('.draft-body')).to_contain_text('8 周')
                     # 重新生成会覆盖正文，必须显式确认
@@ -187,7 +189,7 @@ def main():
                     expect(page.locator('#modal-title')).to_have_text('确认重新生成')
                     page.get_by_label('我已确认覆盖当前稿件').check()
                     page.get_by_role('button',name='确认覆盖并生成',exact=True).click()
-                    expect(page.get_by_text(re.compile('已重新生成初稿'))).to_be_visible()
+                    expect(page.get_by_text(re.compile('已重新生成'))).to_be_visible()
                     checks.append('direct content creation generates a draft and confirms overwrite')
                     # 删除：确认框 + 列表同步
                     page.get_by_role('link',name='返回内容库',exact=True).click()

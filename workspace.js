@@ -278,7 +278,7 @@ async function render() {
        <ul class="source-list" id="src-list"></ul>
        <p class="muted">生成时会把这里的内容读进来，提取可引用的企业介绍与事实，并自动写进稿件的「来源」。素材不等于已确认事实，审核前仍需核对口径与时效。图片与无文字层的扫描件会自动 OCR（本机识别，约 8 秒/页）。</p>
       </section>
-      <div class="toolbar"><button class="primary" id="save-brief">保存任务书</button><button type="button" id="generate" class="primary">${generated?'重新生成初稿':'生成初稿'}</button><span class="muted">${esc(ctx.generator.message)}${meta.generated_at?' · 上次生成 '+esc(localTime(meta.generated_at)):''}</span></div>
+      <div class="toolbar"><button class="primary" id="save-brief">保存任务书</button><button type="button" id="generate" class="primary">${ctx.generator.configured?(generated?'重新生成初稿':'生成初稿'):(generated?'重新整理素材':'整理素材')}</button><span class="muted">${esc(ctx.generator.message)}${meta.generated_at?' · 上次生成 '+esc(localTime(meta.generated_at)):''}</span></div>
       ${generated
         ?`<p class="muted">本稿已生成：约 ${q.plain_length||0} 字，自动质量检查${q.passed?'通过':'未通过'}。正文、来源与审核都在<a href="${link('library',chosen.slug)+'&asset='+asset.id}">内容库</a>处理。</p>`
         :'<p class="muted">点「生成初稿」后，稿件会进入「内容库」，在那里查看、编辑和审核。</p>'}
@@ -292,15 +292,18 @@ async function render() {
        const out=await api(base+'/content/'+asset.id+'/generate','POST',{revision:asset.revision,confirm_overwrite:confirmOverwrite,brief:p.brief,channel:p.channel,audience:p.audience,objective:p.objective,tone:p.tone,keywords:p.keywords,target_length:p.target_length});
        await render();
        const quality=out.quality||{};
-       modal('初稿已生成',
-        `<p>《${esc(out.title||asset.title)}》已完成，正文约 ${quality.plain_length||0} 字。</p>
+       const notes=out.notes||[];
+       const isDraft=ctx.generator.configured;
+       modal(isDraft?'初稿已生成':'素材已整理',
+        `<p>《${esc(out.title||asset.title)}》${isDraft?'已完成':'已按素材整理'}，正文约 ${quality.plain_length||0} 字。</p>
          <p class="muted">${quality.passed?'自动质量检查通过：可以到内容库核对后审核。':'自动质量检查未通过，到内容库看需要补什么。'}</p>
-         ${(out.warnings||[]).map(w=>`<p class="muted">△ ${esc(w)}</p>`).join('')}`,
+         ${(out.warnings||[]).map(w=>`<p class="muted">△ ${esc(w)}</p>`).join('')}
+         ${notes.length?`<ul class="gen-notes">${notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}`,
         async()=>{location.hash=link('library',chosen.slug)+'&asset='+asset.id;},'去内容库查看','留在本页');
       }catch(err){notice(err.message);}
      };
      $('#generate').onclick=()=>{if(generated)modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',()=>runGenerate(true),'确认覆盖并生成');else runGenerate(false);};
-     // ---- 素材（含后台 OCR 轮询）----
+     // OCR 是后台跑的，没结束就隔几秒刷新一次状态
      const SRC_KIND={file:'附件',url:'网址',note:'文本'};
      const SRC_STATUS={ok:['已提取','good'],empty:['没提取到文字','warn'],failed:['提取失败','bad'],unsupported:['需人工说明','warn'],pending:['待提取','warn'],ocr_pending:['OCR 识别中','warn']};
      const paintSources=()=>{
@@ -369,6 +372,8 @@ async function render() {
         ${libAsset.summary?`<p>${esc(libAsset.summary)}</p>`:''}
         <div class="draft-body">${esc(libAsset.body||'（还没有正文）')}</div>
         <h3 style="margin-top:24px">来源</h3><div class="draft-sources">${esc(libAsset.facts||'（没有来源记录）')}</div>
+        ${(meta.notes||[]).length?`<h3 style="margin-top:24px">生成说明</h3><ul class="gen-notes">${meta.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}
+        ${(meta.warnings||[]).length?`<ul class="gen-notes warn">${meta.warnings.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}
         <h3 style="margin-top:24px">质量检查</h3>${qualityHtml}${warnings}
         <p class="muted">有效正文约 ${q.plain_length||0} 字；最低要求 ${q.minimum_length||0} 字。审核与发布前都会重新检查。</p>
         <div class="toolbar" style="margin-top:20px"><a class="button primary" href="${link('library',chosen.slug)+'&asset='+libAsset.id+'&mode=edit'}">编辑</a><a class="button" href="${link('publications',chosen.slug)}">发布安排</a><button type="button" class="btn-quiet" id="lib-del">删除</button></div>
@@ -382,6 +387,8 @@ async function render() {
         <label>摘要<textarea name="summary" rows="3">${esc(libAsset.summary||'')}</textarea></label>
         <label>正文<textarea name="body" style="min-height:420px">${esc(libAsset.body||'')}</textarea></label>
         <h3 style="margin-top:24px">来源（由素材与项目资料自动带出，只读）</h3><div class="draft-sources">${esc(libAsset.facts||'（没有来源记录）')}</div>
+        <h3 style="margin-top:24px">生成说明（不属于正文）</h3><ul class="gen-notes">${(meta.notes||[]).length?meta.notes.map(n=>`<li>${esc(n)}</li>`).join(''):'<li class="muted">这份内容还没有生成过，或是早期版本生成的（没有记录说明）。</li>'}</ul>
+        ${(meta.warnings||[]).length?`<ul class="gen-notes warn">${meta.warnings.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}
         <h3 style="margin-top:24px">质量检查</h3>${qualityHtml}${warnings}
         <p class="muted">有效正文约 ${q.plain_length||0} 字；最低要求 ${q.minimum_length||0} 字。保存后原审核会失效。</p>
         <div class="toolbar" style="margin-top:20px"><button class="primary">保存草稿</button><button type="button" id="lib-review" ${q.passed?'':'disabled'}>审核当前版本</button><a class="button" href="${link('publications',chosen.slug)}">发布安排</a><button type="button" id="lib-regen">重新生成初稿</button><a class="button" href="${link('content',chosen.slug)+'&asset='+libAsset.id}">回任务书与素材</a></div>
@@ -390,7 +397,7 @@ async function render() {
       const values=()=>{const o=Object.fromEntries(new FormData(form));return {title:o.title,summary:o.summary,body:o.body,revision:libAsset.revision};};
       form.onsubmit=async e=>{e.preventDefault();try{const out=await api(base+'/content/'+libAsset.id,'PUT',values());await render();notice(`已保存（版本 ${out.revision}），原审核已失效`);}catch(err){notice(err.message);}};
       $('#lib-review').onclick=()=>{const v=values();const dirty=['title','summary','body'].some(k=>String(v[k]||'')!==String(libAsset[k]||''));if(dirty){notice('请先保存修改并重新通过质量检查');return;}modal('审核内容','<label>审核人<input name="reviewer" required></label><label class="check"><input type="checkbox" required>已逐条核对正文、事实依据及公开范围</label>',async data=>{await api(base+'/content/'+libAsset.id+'/review','POST',{reviewer:data.get('reviewer'),revision:libAsset.revision,confirm:true});},'审核通过');};
-      $('#lib-regen').onclick=()=>modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',async()=>{const out=await api(base+'/content/'+libAsset.id+'/generate','POST',{revision:libAsset.revision,confirm_overwrite:true});return {message:`已重新生成初稿（约 ${(out.quality||{}).plain_length||0} 字）`};},'确认覆盖并生成');
+      $('#lib-regen').onclick=()=>modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',async()=>{const out=await api(base+'/content/'+libAsset.id+'/generate','POST',{revision:libAsset.revision,confirm_overwrite:true});return {message:`已重新生成（约 ${(out.quality||{}).plain_length||0} 字，引擎 ${out.engine}）`};},'确认覆盖并生成');
      }
     }
 
