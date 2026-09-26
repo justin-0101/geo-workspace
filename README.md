@@ -223,6 +223,17 @@ cd skill/geo-diagnosis-single && python -m unittest discover -s tests
 
 ## 许可与致谢
 
-- 未附 LICENSE 文件 → 默认**保留所有权利**。想复用、二次分发或商用，请先联系仓库所有者。
+本项目使用 **[PolyForm Noncommercial License 1.0.0](LICENSE)**（条款全文在 `LICENSE`，含中文说明）。
+
+| | |
+|---|---|
+| ✅ 可以直接做 | 非商业目的的**复用、修改、二次分发**（个人学习/研究/实验/业余项目，以及非营利组织、教育机构、政府机构等使用）。条件：保留 `LICENSE` 全文与其中的 `Required Notice` 版权行 |
+| ⚠️ 需事先书面授权 | **商业用途**：对外提供付费产品/服务（含 SaaS）、接入收费业务、集成进收费产品、为客户交付、公司内部用于自身业务运营 |
+| ℹ️ 性质 | 这是「**源码可见 + 非商用**」（source-available），**不是 OSI 认可的开源许可**；想商用请在本仓库提 Issue 联系所有者 |
+
+软件按「现状」提供，不提供任何担保（见 LICENSE 的 No Liability 段）。
+
+致谢：
+
 - 方法论参考了 [GEORank](https://github.com/yaojingang/GEORank)（Apache-2.0）的模块划分，仅借鉴划分方式，未复制其实现；对应说明见 `skill/geo-diagnosis-single/references/georank-7-module-alignment.md`。
 - 前端版面遵循 `anti-slop-preflight` 规范（禁止等宽卡片堆叠、emoji 当 UI 图标、居中堆叠）。

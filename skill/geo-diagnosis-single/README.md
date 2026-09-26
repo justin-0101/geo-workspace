@@ -57,3 +57,10 @@ python -m unittest discover -s tests
 - `backups/`：改前脚本与改前报告副本，只留本机。
 - `__pycache__/`。
 - 真实主体资料：只留本机 `data/`，不写进仓库。
+
+## 许可
+
+本目录是 [geo-workspace](https://github.com/justin-0101/geo-workspace) 仓库的一部分，
+适用仓库根目录的 `LICENSE`（PolyForm Noncommercial License 1.0.0）：
+非商业用途可复用、修改、二次分发（需保留许可文本与 `Required Notice` 版权行）；
+商业用途需事先取得仓库所有者的书面授权。
