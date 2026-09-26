@@ -1,175 +1,173 @@
-# GEO 工作空间（本地重构版）
+# GEO 工作空间
 
-## 入口
+本地单用户的 GEO（生成式引擎优化）可见度诊断与内容发布工作台。
 
-打开 http://127.0.0.1:4173/ 。工作台、项目、改善、内容、发布、报告及设置都在同一应用右侧显示。
+一条主线：**创建主体项目 → 配置并冻结诊断问题 → 用真实浏览器到 AI 平台逐题提问取证 → 生成报告与改善任务 → 内容人工审核 → 发布并回填回执**。原始回答、截图、结构化观测与报告全部留在本机。
 
-- 工作台：跨项目待处理事项与最近活动，不绑定某个项目。
-- 诊断项目：创建/搜索/确认删除，项目内完成主体资料、问题配置、冻结、环境检查、执行与结果查看。
-- 改善任务：从已校验诊断的成功观测生成有来源的改善项，不把执行失败当作品牌不可见。
-- 内容生产：由改善项创建草稿、填写正文及事实来源、人工审核。修改后审核失效。
-- 批量发布：当前版本审核通过才能创建人工任务，保存发布版本快照；人工回填链接，不代表平台接口自动核验。
-- 报告：右侧查看报告正文。截图在右侧结果区显示，其他证据可下载。
+> 定位：可运行、可自证的本地原型，不是托管服务。单用户、单机、SQLite、无账号系统、**不对公网监听**。诊断与发布都在你自己的浏览器会话里完成——系统不代填账号密码、不导出 cookie、不绕过平台验证。
 
-## 隔离与启动
+---
 
-新版独立数据库：`data/redesign.db`；诊断文件：`data/runs/<id>/`；浏览器：`data/browser-profile/`。
-不读取或迁移原版数据库、客户配置、runs 或登录 profile。诊断引擎就在本仓库 `skill/geo-diagnosis-single/`（同一份代码也通过目录联接暴露给本机 agent 的 skill 发现机制）。
+## 功能
 
-使用包含 FastAPI、Uvicorn、Playwright、httpx 的 Python 环境。当前机器已验证的解释器：
-`python`
+| 模块 | 做什么 |
+|---|---|
+| 工作台 | 跨项目待处理事项与最近活动（不绑定某个项目） |
+| 诊断项目 | 创建 / 搜索 / 确认删除；项目内完成主体资料、问题配置、冻结、环境检查、执行与结果查看 |
+| 改善任务 | 只从「有完整证据的成功观测」生成改善项；不把执行失败当作品牌不可见 |
+| 内容生产 | 从改善任务生成，或直接创建；正文 + 事实来源齐备并人工审核后才可发布 |
+| 批量发布 | 十个平台的适配器：公众号走官方 API 写草稿箱，其余走浏览器自动化或人工发布回执 |
+| 报告 | 报告正文在线阅读；截图在结果区显示，其他证据可下载 |
 
-在本目录一条命令启动（会自检端口与响应）：
+---
 
-```powershell
-& 'python' start.py
-# 仅查看状态：
-& 'python' start.py --status
+## 仓库结构
+
+```
+geo-platform-redesign-v1/            # 本仓库根目录 = 平台本体
+├─ start.py / serve.py               # 启动器（拉起就返回 / 前台常驻）
+├─ frontend_server.py                # 4173 前端白名单服务
+├─ workflow_api.py                   # 8798 FastAPI（项目/资料/冻结/执行/内容/发布）
+├─ workspace_store.py                # SQLite 存储与增量迁移
+├─ diagnosis_config.py               # 诊断平台、八题生成与冻结配置校验
+├─ diagnosis_runs.py                 # 冻结批次、任务矩阵、配置哈希与目录归属校验
+├─ browser_engine.py                 # 调用引擎子进程：环境检查/执行/报告/浏览器锁
+├─ editorial_flow.py                 # 改善项 → 草稿 → 审核 → 发布
+├─ publish_adapters.py / wechat_mp.py / browser_publisher.py / platform_login.py
+├─ workspace.html / workspace.css / workspace.js    # 统一前端框架
+├─ legacy/                           # 旧版多页面原型（已废弃，保留供比对，不要启动）
+└─ skill/geo-diagnosis-single/       # 诊断引擎（也可作为独立 agent skill 使用）
+    ├─ SKILL.md                      # 引擎入口文档
+    ├─ scripts/                      # 浏览器驱动、执行器、报告渲染、拓词与资产工具
+    ├─ templates/                    # 配置与产出物模板
+    ├─ references/                   # 方法论参考
+    └─ tests/                        # 引擎自身测试
 ```
 
-`start.py` 是「拉起就返回」的启动器（服务进程脱离本终端，日志落 `data/frontend.log` / `data/workflow-api.log`）。
-需要**一个长期存活的前台进程**来代表这个平台时（例如交给 `<project-dashboard>` 项目管理台托管，它的运行记录按「一个 PID + `taskkill /T`」管理），改用 `serve.py`：
+不入库（见 `.gitignore`）：`data/`（SQLite、runs 证据、浏览器 profile、日志）、`backups/`、`test-results/`、`REBUILD-PROGRESS.md`。
 
-```powershell
-& 'python' serve.py
-# Ctrl+C 或结束该进程 = 前端与 API 一起停
+---
+
+## 快速开始
+
+### 环境要求
+
+- **Windows**：浏览器自动化与两个校验脚本（`validate-run.ps1`、`update-task-state.ps1`）按 Windows 写；换 Linux/macOS 需要自行改写这两处。
+- **Python 3.11+**（已在 3.11 验证）。
+- **Google Chrome**：默认取 `C:\Program Files\Google\Chrome\Application\chrome.exe`，可用 `GEO_CHROME_PATH` 覆盖。引擎直接驱动系统 Chrome，**不需要** `playwright install`。
+- **依赖**：
+
+```bash
+pip install fastapi uvicorn playwright httpx pydantic
 ```
 
-两者不要同时用：`serve.py` 跑着时再跑 `start.py` 会因端口被占而失败（前端自身也会拒绝启动）。
+### 启动
 
-等价的手工方式（两个终端）：
-
-```powershell
-& 'python' -m uvicorn workflow_api:app --host 127.0.0.1 --port 8798
-& 'python' frontend_server.py
+```bash
+python start.py            # 拉起就返回，服务脱离终端，日志落 data/frontend.log、data/workflow-api.log
+python start.py --status   # 只查看状态
+python serve.py            # 前台常驻（Ctrl+C = 前端与 API 一起停）
 ```
 
-不要用 `python -m http.server` 暴露整个目录，也不要单独启动 `legacy/` 里的旧页面或旧 `standalone_api.py`。`frontend_server.py` 只提供 `workspace.html/css/js`，并将其余旧入口重定向到统一框架；`data/`、`backups/`、`legacy/`、脚本和测试均不可下载。它还会在启动时检测 4173 是否已被占用并直接退出，避免与普通 `http.server`（监听 0.0.0.0）共存。
+- 前端 http://127.0.0.1:4173/ ，API 127.0.0.1:8798。
+- `start.py` 与 `serve.py` **不要同时用**：端口被占时前端会拒绝启动。
+- 等价的手工方式：`python -m uvicorn workflow_api:app --host 127.0.0.1 --port 8798` + `python frontend_server.py`。
 
-> 已发生的真实事故：一个残留的 `python -m http.server 4173 --directory ...` 与白名单服务同时监听（前者 0.0.0.0、后者 127.0.0.1），导致 `http://<局域网IP>:4173/data/redesign.db` 可直接下载。那些进程已关闭并加上启动保护；当前已无任何面向非回环地址的本项目监听。
+### 环境变量
 
-可用 `GEO_REDESIGN_DATA` 指定测试数据目录。数据库迁移只增加表，不清空已有资料。切换前备份在 `backups/pre-cutover-*`。
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `GEO_REDESIGN_DATA` | 数据目录（SQLite、runs、浏览器 profile、日志） | `./data` |
+| `GEO_REDESIGN_ENGINE` | 诊断引擎脚本目录 | 仓库内 `skill/geo-diagnosis-single/scripts` |
+| `GEO_CHROME_PATH` | Chrome 可执行文件 | `C:\Program Files\Google\Chrome\Application\chrome.exe` |
+| `GEO_BROWSER_USER_DATA` / `GEO_BROWSER_PROFILE_DIR` / `GEO_CDP_PORT` | 隔离浏览器 profile 与调试端口 | 平台自动设为 `data/browser-profile` / `Default` / `9348` |
+| `GEO_MIN_ANSWER_CHARS` | 回答区达到多少字符才算有效（引擎） | `400` |
+| `GEO_MAX_CONSECUTIVE_INVALID` | 同一平台连续多少次无效回答就熔断该平台 | `2` |
+| `GEO_PAUSE_TIMEOUT_S` / `GEO_MAX_PAUSES_PER_TASK` | 遇到平台验证时的人工接力等待与次数上限 | `1800` / `3` |
+
+### 为什么必须用白名单服务
+
+`frontend_server.py` 只提供 `workspace.html/css/js`，其余旧入口重定向到统一框架；`data/`、`backups/`、`legacy/`、脚本与测试均不可下载；启动前还会检测 4173 是否已被占用。
+
+**不要用 `python -m http.server` 暴露本仓库目录。** 本项目真实发生过一次：一个残留的 `python -m http.server` 与白名单服务同时监听（前者监听 `0.0.0.0`），导致 `data/redesign.db` 能被局域网直接下载。该进程已终止，并加了「启动前检测端口占用」的保护。
+
+---
+
+## 诊断引擎
+
+平台以**子进程**方式调用 `skill/geo-diagnosis-single/scripts/` 下的脚本；这个目录本身也可以作为独立的 agent skill 使用，入口是 `SKILL.md`。
+
+引擎路径解析顺序：`GEO_REDESIGN_ENGINE` → 仓库内 `skill/geo-diagnosis-single/scripts` → `~/.agents/skills/geo-diagnosis-single/scripts`。本机开发环境用目录联接（junction）把 `~/.agents/skills/geo-diagnosis-single` 指向仓库内目录，因此 agent 的 skill 发现机制与平台读到的是同一份文件，不需要同步。
+
+引擎产出（每批次目录 `data/runs/<run_id>/`）：
+
+```
+frozen-config.json   tasks.jsonl   observations.jsonl   citations.jsonl
+state.json / manifest.json
+raw/       原始回答
+evidence/  截图与跳过说明
+logs/      引擎日志
+report/    diagnosis.md  metrics.json  manual-review.md  optimization-plan.md
+           QUALITY_REPORT.md  TEXT_CHECK.md
+```
+
+---
 
 ## 诊断执行约束
 
-1. 资料保存后生成八题建议，人工逐题确认。前五题不能带品牌或官方链接。
+1. 资料保存后生成八题建议，人工逐题确认。前五题不能带品牌名、别名或官方链接。
 2. 诊断平台与发布平台分开。诊断支持 DeepSeek、豆包、千问、秘塔。
-3. 冻结生成配置哈希和任务矩阵，每项目只能有一个未结束批次。
-4. 在新版独立浏览器窗口完成登录，返回点击“已完成登录”，再检查环境。
-5. 检查通过后确认提交，调用真实浏览器执行器。每题每平台一次，不重试提交状态不明的任务。
-6. 原始回答、截图、观测和报告保存到新版运行目录。只有报告校验通过才标记完成。
-7. 中断后可以检查环境；仍为 running/manual_required 的任务不能再次提交。可确认终止本批次并保留证据，或在任务全部终态时重新生成报告。
-8. 报告文案只能来自本批次的冻结配置（主体事实 + 问题原文）。生成时同步写 `report/TEXT_CHECK.md` 做文案体检；一旦命中与本主体无关的行业词（模板泄漏），批次标为 `degraded`，不得直接对外交付。
+3. 冻结生成配置哈希与任务矩阵；**每个项目同时只允许一个未结束批次**。
+4. 在隔离浏览器窗口里自行完成平台登录，回到页面确认后再检查环境。
+5. 检查通过后确认提交，调用真实浏览器执行器。**每题每平台只提交一次**，不重试提交状态不明的任务。
+6. 原始回答、截图与观测落盘到本批次目录；只有报告校验通过才标记完成。
+7. 中断后可以重新检查环境；仍为 `running` / `manual_required` 的任务不能再次提交。可以在任务全部终态时重新生成报告，或确认终止本批次（证据保留）。
+8. **报告文案只能来自本批次的冻结配置**（主体事实 + 问题原文）。生成时同步写 `report/TEXT_CHECK.md` 做文案体检；一旦命中与本主体无关的行业词（模板泄漏），批次标为 `degraded`，不得直接对外交付。
 
-## 当前验证结果与未完成项
+---
 
-已验证（隔离临时数据库，不使用用户项目）：
-- 单元/API：配置修订锁、跨项目访问、确认删除、冻结哈希、活动批次锁、发布审核门禁、快照和回执、进程锁、登录失败门禁、禁止重复提交不明确任务。
-- 浏览器：创建项目→资料→问题→冻结→刷新；合成证据→改善→内容→审核→人工安排→回执；项目上下文；跨项目隔离；仅删除被确认项目；删除取消/确认；空工作空间设置；接口失败→重新加载恢复。
-- 测试规模：`python -m unittest test_workspace_core test_workflow_api test_editorial_flow test_engine_gates -q` 共 41 项通过（含暂停态指引、resume 契约与概览接口的 API 级验证）。
-- 只读实机体检（`check_live_environment.py`，不提交任何问题）：四个诊断平台入口均可打开，并给出各平台登录状态的启发式判断。证据 `test-results/live-preflight/`。
-- 登录窗口链路已验证：`check_login_window.py` 确认能拉起隔离浏览器并进入等待人工登录状态。
-- 执行后链路已验证（`check_pipeline.py`，合成批次，不接触任何平台）：`update-task-state.ps1` 拒绝 `pending → success`，拒绝缺 `-ObservationRef` 的成功；`pending → running → success/failed` 正常写入；报告渲染出 `diagnosis.md`、`metrics.json`、`manual-review.md`、`optimization-plan.md`、`QUALITY_REPORT.md`；`validate-run.ps1` 返回 `ok: true`（8 任务 / 8 观测 / 无错误）。证据 `test-results/pipeline-results.json`。
-- `test-results/browser-results.json` 与截图留存。测试中的合成观测**不是外部 AI 平台真实诊断证据**。
-- 正式前端入口已经切至统一框架，8798 使用 workflow_api，原版8787不变。
+## 数据隔离与安全边界
 
-尚未完成或不在本轮承诺：
-- 生产级验收需要在更多主体与更多批次上复现；单次执行跑通不等于长期稳定。
-- 登录提醒：隔离 profile 是全新环境，不会读取你日常浏览器的登录态，也不读取或导出任何凭据；请在项目执行页点“打开登录窗口”后自行登录并扫码。
+- **运行数据不入库**：`data/` 只在本机；不使用、不迁移旧版应用的数据库、客户配置、runs 或登录 profile。
+- **浏览器隔离**：诊断与发布共用一个专用 profile（`data/browser-profile/`），不读取你日常浏览器的登录态，不读取或导出 cookie、令牌，不代过平台验证。
+- **凭据**：公众号 AppID/AppSecret 存本机 SQLite 的 `workspace_preferences`，界面与接口只返回「是否已配置 + 掩码」，永不回传明文。**但它在磁盘上是明文**，所以不要在不设防的共享机器上填写。
+- **项目删除**：级联删除结构化记录；原始证据目录保留，但不再能通过项目 API 访问（暂无回收站界面）。
+- **并发**：浏览器是全局独占资源（一个进程锁 + `browser-execution.lock`），同一时刻只允许一个诊断或发布在用浏览器。
 
-### 真实执行验证
+---
 
-系统已跑通一次“真实平台执行 → 证据落盘 → 报告生成 → 生成改善任务”的闭环。**具体主体名称、批次 ID 与诊断数值只保留在本机 `data/`，不写入文档。**
+## 发布平台适配器
 
-- 每个任务的原始回答、截图证据与结构化观测均落盘在 `data/runs/<批次>/`（`raw/`、`evidence/`、`observations.jsonl`）。
-- 报告套件：`diagnosis.md`、`metrics.json`、`manual-review.md`、`optimization-plan.md`、`QUALITY_REPORT.md`。
-- 执行器会拒绝非法状态跳转（例如 `pending → success`），也拒绝缺少观测引用的终结状态；只有报告校验通过才标记为 `completed`。
-- 若校验发现任务缺少证据文件，批次标记为 `degraded`（报告已生成但不完整），系统如实标注、允许查看报告与生成改善任务，但不宣称完整诊断完成。
-- 改善任务只从“有完整证据的成功观测”衍生，不把执行失败当作主体不可见。
+十个平台的唯一定义在 `publish_adapters.py`：每个平台声明接入方式、需要的内容要素、需要的凭据与入口。
 
-### 本轮修复（你遇到的两个问题）
-
-1. **「窗口仍然打开」误拦**：检测到残留的诊断浏览器进程时，现在会**自动清理并继续**（带 2 秒宽限，避免你正在登录时被误关），不再让你手动点按钮；只有清理失败才提示手动结束。
-2. **失败原因提示不准**：检查环境失败会按真实原因区分（超时/限流、profile 被占用、打不开、待登录、截图超时），不再是笼统的“请完成平台登录”。
-3. 另修复：登录窗口异常退出、诊断结束后残留 Chrome 进程，以及一个严重隔离缺陷（残留 `python -m http.server` 监听 0.0.0.0 曾使 `data/redesign.db` 可被局域网下载，已终止并加启动保护）。
-
-### 项目概览（沿用第一版图文语言，按设计规范重排版面）
-
-进入项目后默认打开「概览」标签。数据全部来自该批次 `report/metrics.json` 与观测文件：
-
-- **结论带**（顶部）：一句话结论（非品牌题 N 条有效回答 / 提及 X 次 / 推荐 Y 次 / 官方引用 Z 条）+ 证据完整度徒标 + 边界说明。
-- **核心指标主卡**：非品牌题自然提及率大号数字 + 4 项子指标（明确推荐、官方来源覆盖、引用记录、任务完成），带迷你进度条。
-- **证据完整度环形卡**：占比 + 缺证据任务清单（逐条列出，不塞成一行）。
-- **问题维度分布**：Q01–Q08 分组条形（有效回答 / 官方来源引用）；出现第二个批次后自动切换为「批次趋势」折线。
-- **平台对比表**、**引用来源域名分布**（最多 8 个）、**报告边界**。
-- 右上「查看报告」按钮直接打开该批次 `diagnosis.md`。
-
-版面依据：对比过的开源参考是 GEORank（`skill/geo-diagnosis-single/references/georank-7-module-alignment.md`，仓库只公开模块划分、无布局规范），实际采用的是本机已有的 `anti-slop-preflight` 规范（对标 taste-skill）。它明确禁止“3/4 列等宽卡片”“emoji 当 UI 图标”“居中堆叠”，因此摈弃了原先的 4 等宽 KPI 卡，改为结论带 + 非对称栅格（主指标 1.7fr / 轴助 1fr），并提高信息密度。
-
-### 内容生产：两种入口
-
-- **从诊断改善任务生成**：改善任务 → 编写内容，每条内容对应一条诊断缺口（`source='diagnosis'`）。
-- **直接生成内容（不需要诊断结果）**：内容生产页「＋ 直接生成内容」，填标题 + 写作要点（每行一个，会变成小节标题）+ 用途，即可创建草稿（`source='manual'`）。没有任何诊断批次的项目也能用。
-
-直接创建只生成**结构大纲**（不编造事实）：每个小节都标着「（待补充：…）」。正文里还有“待补充”段落时**不能通过审核**，事实依据栏为空也不能通过；两种入口共用同一道人工审核与发布门禁。
-
-数据结构：`editorial_assets.action_id` 改为可空，新增 `source`（`diagnosis` / `manual`）与 `brief`；升级时自动重建该表并保留原有内容（迁移前备份在 `backups/pre-content-mode-*`）。
-
-### 继续使用的步骤
-
-1. 诊断项目 → 选择项目 → 执行与结果：查看逐题状态、回答与截图证据，点「生成改善任务」。
-2. 报告中心：在框架内直接阅读 `diagnosis.md` 等 5 份报告。
-3. 改善任务 → 编写内容 → 审核 → 批量发布：内容必须填写事实依据并人工审核后，才能创建人工发布任务；回填链接仅作人工回执，不代表平台自动上线。
-4. 需要新一轮诊断时，另建批次并重新「检查环境 → 开始诊断」（同项目同时只允许一个未结束批次）。
-
-### 已知限制
-
-- 登录预检是启发式判断，可能误判，需要现场核验。
-- 硬杀服务后的孤立浏览器子进程恢复仍需专项验证；异常时不要重复启动同一 profile。
-- 内容目前是有事实来源和人工审核的编辑流程，未接自动生成服务。
-- 改善自动提取目前只覆盖“成功回答中未提及主体”，其他事实准确性、权威性与结构问题需扩展，不能称完整原因分析。
-- 主体问题建议当前针对服务型业务；产品/个人/案例须人工调整题目，不应把建议视为已完成研究。
-- 项目删除级联删除结构化记录；原始证据文件保留但不再可通过项目 API 访问，尚无回收站界面。
-- 浏览器自动化的选择器随平台改版会失效；失效时只会转人工并留截图，不会静默失败。
-
-## 发布平台适配器（已实现三条通道）
-
-十个发布平台单一来源在 `publish_adapters.py`：每个平台声明接入方式、需要的内容要素、需要的凭据与入口。
-
-| 平台 | 接入方式 | 实现 | 需要内容要素 |
+| 平台 | 接入方式 | 实现状态 | 需要内容要素 |
 |---|---|---|---|
-| 微信公众号 | 官方 API | 已实现：`wechat_mp.py` 调 `cgi-bin/draft/add` 写入草稿箱 | 标题、正文 |
-| 知乎 / 百家号 / 今日头条 / CSDN / 搜狐号 / 大鱼号 | 浏览器自动化 | 已实现：`browser_publisher.py`，复用隔离浏览器 profile | 标题、正文 |
+| 微信公众号 | 官方 API | `wechat_mp.py` 调 `cgi-bin/draft/add` 写入草稿箱 | 标题、正文 |
+| 知乎 / 百家号 / 今日头条 / CSDN / 搜狐号 / 大鱼号 | 浏览器自动化 | `browser_publisher.py`，复用隔离浏览器 profile | 标题、正文 |
 | 小红书 | 浏览器自动化 | 同上 | 标题、正文、**封面图** |
 | 官网 | 人工发布 | 无通用接口，回填链接 | 标题、正文 |
 | 百度百科 | 人工发布 | 只有合作渠道 | 标题、正文、**事实依据** |
 
-统一接口（`PublishAdapter`）：`capability()` 能力声明、`health()` 凭据/登录态就绪度、`check_asset()` 缺失要素、`publish()` 统一入口；`submit_api()` / `submit_browser()` 是两条真实执行路径。
+状态语义（不把「点了按钮」当成功）：
 
-状态语义（不把“点了按钮”当成功）：
-
-- `draft_created`：公众号接口明确返回 media_id；**草稿不等于群发上线**。
-- `submitted`：浏览器自动化点到了保存/发布按钮**且**页面出现成功字样；仍要求人工去平台后台核验。
-- `manual_required`：缺内容要素、编辑器定位不到、未登录、无自动接口、未配置凭据 —— 一律附原因与截图。
+- `draft_created`：公众号接口明确返回 `media_id`。**草稿 ≠ 群发上线。**
+- `submitted`：浏览器自动化点到了保存/发布按钮**且**页面出现成功字样，仍要求人工去平台后台核验。
+- `manual_required`：缺内容要素、编辑器定位不到、未登录、无自动接口、未配置凭据——一律附原因与截图。
 - `failed`：接口报错或自动化异常，附原始错误（凭据不会出现在消息里）。
 
-**凭据存储边界**：`platform_credentials.py` 只写本机 SQLite（`workspace_preferences`），界面与接口只返回“是否已配置 + 掩码”，永不回传明文；读取只发生在调用平台接口那一刻。**但它在本机是明文存储**，因此不要在不设防的共享机器上填公众号凭据。浏览器平台的登录态存在隔离 profile 目录里，同样属于本机敏感数据。
+接入新平台三步：`PLATFORM_SPECS` 加一条 → 实现 `PublishAdapter` 子类并登记到 `REGISTRY` → `browser_publisher.TARGETS` 补选择器。
 
 相关接口：
 
-- `GET /api/platforms`：诊断平台 + 十个发布平台的完整契约
+- `GET /api/platforms`：诊断平台 + 发布平台的完整契约
 - `GET /api/projects/{slug}/publishing/capabilities?asset_id=`：各平台对某条内容的就绪情况（含缺失要素）
-- `PUT /api/platforms/{platform_id}/credentials`、`POST /api/platforms/{platform_id}/credentials/check`：填写与校验（公众号调 `cgi-bin/token` 验证，不落日志）
-- `POST /api/platforms/login-window`：打开隔离浏览器的平台登录窗口
-- `POST /api/projects/{slug}/publishing/{id}/submit`：执行该平台适配器
-
-接入新平台只需三步：在 `PLATFORM_SPECS` 加一条、实现一个 `PublishAdapter` 子类并登记到 `REGISTRY`、`browser_publisher.TARGETS` 里补选择器。批量发布页的「平台接入与凭据」表直接读这份契约。
+- `PUT /api/platforms/{platform_id}/credentials`、`POST /api/platforms/{platform_id}/credentials/check`：填写与校验（调 `cgi-bin/token` 验证，不落日志）
+- `POST /api/projects/{slug}/publish`：执行发布（按内容 × 平台逐条返回结果）
+- `POST /api/projects/{slug}/publishing/{identity}/receipt`：人工回填发布链接
 
 ### 平台登录窗口与登录态识别
 
-点「打开登录窗口」→ 系统在隔离浏览器里逐个打开平台的**编辑器页**（登录后平台会把你带回编辑器，正好也是要识别的页面）→ 你在窗口里自己登录 → 系统每 3 秒读一次页面判断状态 → 界面自动刷新；**请求的平台全部识别到已登录后，窗口自动关闭**，同时释放浏览器锁。
-
-状态只从页面证据判断，四级：
+点「打开登录窗口」→ 在隔离浏览器里逐个打开平台**编辑器页**（登录后平台会把你带回编辑器）→ 你在窗口里自己登录 → 系统每 3 秒读一次页面判断状态 → 界面自动刷新；**请求的平台全部识别为已登录后窗口自动关闭**，同时释放浏览器锁。
 
 | 状态 | 含义 | 判断依据 |
 |---|---|---|
@@ -178,39 +176,54 @@
 | 需登录 | 还没登录 | 在登录 URL / 有密码框 / 有「扫码登录」类文案 |
 | 未检测 | 还没测过，或页面没打开 | 空白页，或正文过短 |
 
-判定偏保守：**没有“编辑器可识别”这级证据时绝不报已登录**，宁可报“已离开登录页”让人去核。浏览器被别人占着（诊断执行或发布中）时不抢 profile，直接告诉你先关窗口。
+判定偏保守：**没有「编辑器可识别」这级证据时绝不报已登录**，宁可报「已离开登录页」让人去核。浏览器被占用时不抢 profile，直接提示先关窗口。
 
-相关接口：
+---
 
-- `GET /api/platforms/login-state`：会话信息 + 7 个浏览器平台的状态、中文标签、识别时间、依据；界面每 3 秒轮询它
-- `POST /api/platforms/login`：打开登录窗口（可只传部分平台），返回完整快照
-- `POST /api/platforms/login-state/probe`：无头「重新检测」；浏览器被占用时返回 409
+## 测试
 
-边界：只读页面，不代填账号密码、不导出 cookie；登录态存在隔离 profile 目录（本机敏感数据），不进数据库。窗口被关掉时如果最后一轮识别还没跑完，会自动补一次无头复核。
+```bash
+# 平台：存储、API、编辑流程、引擎门禁、文案体检、平台登录、端口探测
+python -m unittest test_workspace_core test_workflow_api test_editorial_flow \
+                   test_engine_gates test_report_text_check test_platform_login test_port_probe
 
-### 实测到哪一步了（2026-09-20，只读实测）
+# 浏览器流程（会起临时前端/API 与临时浏览器，不向外部平台发送任何问题）
+python test_browser_flow.py
 
-`check_publish_env.py` 逐个打开平台编辑器（不填写、不点发布），证据在 `test-results/publish-env/`：
-
-- 7 个浏览器平台**全部**落到登录页（`login_wall=true`，7 张截图 + `results.json`）。也就是说：现在缺的不是站点拦截，而是**隔离浏览器里还没登录过这些平台**。
-- 首轮用默认无头 UA 时，6 个平台直接 `goto`/`inner_text` 超时；换成真实 Chrome UA + `zh-CN` 后同样页面 5 秒内打开。**结论：这类中文平台会因无头标识拒绝响应，检查与发布都必须带真实 UA。**
-- **仍未验证**：登录之后的编辑器选择器能不能定位、能不能真的存草稿/发布。7 个平台的选择器是“尽力而为”的候选，登录后必须逐个实跑确认；跑不通的话适配器只能按设计转 `manual_required` 并留截图。
-- **仍未验证**：公众号 API 路径从未用真实 AppID/AppSecret 调通过（单测里是 mock HTTP 客户端），且需要该 IP 在公众号后台白名单、账号有草稿接口权限。
-
-## 不在本轮范围
-
-多租户、账号系统、云部署、公网安全加固均未实现。不对公网监听，不承诺自动上线。SQLite 文件、浏览器 profile、公众号凭据需要本机权限及备份保护。
-
-发布平台仅：微信公众号、知乎、百家号、今日头条、CSDN、小红书、官网、搜狐号、大鱼号、百度百科。
-
-## 回归测试
-
-```powershell
-& 'python' -m unittest test_workspace_core test_workflow_api test_editorial_flow test_engine_gates test_platform_login test_port_probe -q
-& 'python' test_browser_flow.py
+# 引擎自身
+cd skill/geo-diagnosis-single && python -m unittest discover -s tests
 ```
 
-端口存活探测（`ports.port_busy`）是 `start.py --status` 与 `frontend_server.py` 启动前检查共用的唯一实现。
-它以 `select` + `SO_ERROR` 判定，不把 connect 的"进行中"返回值（Windows 10035/10036/10037）当成端口空闲。
+当前规模（2026-09-26）：平台侧 **85 项**、引擎侧 **67 项**，全部通过。
 
-浏览器回归使用临时 API 端口、临时数据库和临时浏览器，不发送任何外部问题。测试清理仅作用于自身临时目录。
+测试一律使用临时数据目录、临时端口与临时浏览器，不接触真实项目数据；清理只作用于自身临时目录。
+
+---
+
+## 验证状态与已知限制
+
+已验证：
+
+- 平台侧：配置修订乐观锁、跨项目访问隔离、确认删除、冻结配置哈希不可篡改、项目级活动批次锁、发布审核门禁、发布快照与人工回执、进程锁、登录失败门禁。
+- 浏览器流程：创建项目 → 资料 → 问题 → 冻结 → 刷新；合成证据 → 改善 → 内容 → 审核 → 人工安排 → 回执；项目上下文与跨项目隔离。
+- 引擎：`update-task-state.ps1` 拒绝 `pending → success`、拒绝缺观测引用的成功；报告渲染与 `validate-run.ps1` 校验；段落级文案体检。
+- 已跑通一次「真实平台执行 → 证据落盘 → 报告生成 → 生成改善任务」闭环。**具体主体名称、批次 ID 与诊断数值只留在本机 `data/`，不写入仓库。**
+
+限制与未验证项：
+
+- **登录之后的编辑器选择器未逐个实跑确认**：7 个浏览器平台的实测结果是全部落在登录页；登录后能否定位编辑器、能否真的存草稿，必须逐个验证。跑不通只会转 `manual_required` 并留截图，不会静默失败。
+- **公众号 API 从未用真实 AppID/AppSecret 调通**（单测里是 mock HTTP 客户端），且需要该出口 IP 在公众号后台白名单、账号有草稿接口权限。
+- 这类中文平台会因无头标识拒绝响应：检查与发布必须带真实 Chrome UA，否则页面直接超时。
+- 登录预检是启发式判断，可能误判，需要现场核验。
+- 改善项的自动提取目前只覆盖「成功回答中未提及主体」；事实准确性、权威性与结构问题尚未覆盖，不能称完整原因分析。
+- 八题建议当前针对**服务型业务**；产品 / 个人 / 案例类主体需人工调整题目。
+- 每批次只提交一次、不复测，因此结论是**时点快照**，不代表趋势或因果。
+- 多租户、账号系统、云部署、公网安全加固均未实现。
+
+---
+
+## 许可与致谢
+
+- 未附 LICENSE 文件 → 默认**保留所有权利**。想复用、二次分发或商用，请先联系仓库所有者。
+- 方法论参考了 [GEORank](https://github.com/yaojingang/GEORank)（Apache-2.0）的模块划分，仅借鉴划分方式，未复制其实现；对应说明见 `skill/geo-diagnosis-single/references/georank-7-module-alignment.md`。
+- 前端版面遵循 `anti-slop-preflight` 规范（禁止等宽卡片堆叠、emoji 当 UI 图标、居中堆叠）。
