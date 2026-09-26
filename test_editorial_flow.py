@@ -79,7 +79,7 @@ class EditorialTests(APITests):
         r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':1,'confirm':True})
         self.assertEqual(r.status_code,409); self.assertIn('待补充',r.json()['detail'])
         # 补齐正文与事实后可过审、可发布
-        self.assertEqual(self.client.put(base+'/content/'+aid,json={'title':'设备资产管理系统选型指南','body':'正文（已核对）','facts':'官网 https://www.example.com','revision':1}).status_code,200)
+        self.assertEqual(self.client.put(base+'/content/'+aid,json={'title':'设备资产管理系统选型指南','body':'正文（已核对）','facts':'官网 https://example.com','revision':1}).status_code,200)
         self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True}).status_code,200)
         with patch.object(adapters.PublishAdapter,'submit_browser',
                           lambda self,a,evidence_dir=None: adapters.PublishResult('submitted','已提交（测试）')):
