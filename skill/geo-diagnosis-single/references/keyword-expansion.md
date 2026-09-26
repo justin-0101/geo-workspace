@@ -96,14 +96,14 @@
 
 ```powershell
 # 1. 准备拓词配置
-cp '%USERPROFILE%\.agents\skills\geo-diagnosis-single\templates\keywords-expansion.template.json' `
+cp "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\templates\keywords-expansion.template.json" `
    '<company-dir>\config\keywords-expansion.json'
 
 # 2. 填入 4 层 + 推荐型关键词
 # 编辑 <company-dir>\config\keywords-expansion.json
 
 # 3. 拓词到 16-30 题(默认 dry-run)
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\expand-keywords.py' `
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\expand-keywords.py" `
    '<company-dir>\config\keywords-expansion.json' `
    --out '<company-dir>\config\expanded-questions.json'
 ```

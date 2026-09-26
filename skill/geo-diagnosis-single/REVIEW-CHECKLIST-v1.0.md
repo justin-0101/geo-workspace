@@ -1,6 +1,6 @@
 # 📋 GEO 诊断 Skill v2.0 融合方案评审 Checklist
 
-> **评审对象**: `%USERPROFILE%\.agents\skills\geo-diagnosis-single` v2.0 融合实施
+> **评审对象**: `$env:USERPROFILE\.agents\skills\geo-diagnosis-single` v2.0 融合实施
 > **对标基准**: yaojingang/GEORank main 分支(commit 424a0cf)
 > **评审维度**: 文档层 / 模板层 / 脚本层 / 工作流层 / 功能 / 质量 / 流程 / 风险
 > **评审人**: _____________ **日期**: _____________ **结论**: ☐ 通过 / ☐ 有条件通过 / ☐ 不通过
@@ -522,7 +522,7 @@
 
 ```powershell
 # 1. 拉最新 v2.0 代码
-cd '%USERPROFILE%\.agents\skills\geo-diagnosis-single'
+cd "$env:USERPROFILE\.agents\skills\geo-diagnosis-single"
 
 # 2. 列出所有新文件
 Get-ChildItem -Recurse -File |
@@ -539,24 +539,24 @@ Get-ChildItem references\*.md | ForEach-Object {
 
 ```powershell
 # A1-A3 文档存在
-Test-Path '%USERPROFILE%\.agents\skills\geo-diagnosis-single\references\georank-7-module-alignment.md'
-Test-Path '%USERPROFILE%\.agents\skills\geo-diagnosis-single\references\keyword-expansion.md'
-Test-Path '%USERPROFILE%\.agents\skills\geo-diagnosis-single\references\tools-output-spec.md'
+Test-Path "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\references\georank-7-module-alignment.md"
+Test-Path "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\references\keyword-expansion.md"
+Test-Path "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\references\tools-output-spec.md"
 
 # B1-B5 模板 JSON 合法性
 foreach ($f in 'keywords-expansion.template.json', 'questions.expanded.template.json') {
-  python -m json.tool "%USERPROFILE%\.agents\skills\geo-diagnosis-single\templates\$f" > $null
+  python -m json.tool "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\templates\$f" > $null
   Write-Host "$f : $LASTEXITCODE"
 }
 
 # C1.1-C5.10 脚本运行
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\expand-keywords.py' --help
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\generate-schema.py' --help
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\ai-friendliness-score.py' --help
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\content-asset-matrix.py' --help
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\expand-keywords.py" --help
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\generate-schema.py" --help
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\ai-friendliness-score.py" --help
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\content-asset-matrix.py" --help
 
 # E1 v1.0 主流程回归测试
-& '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\validate-run.ps1' -RunDir 'E:\GEO\示例财税代理服务有限公司\runs\20260909-005338'
+& "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\validate-run.ps1" -RunDir 'E:\GEO\示例财税代理服务有限公司\runs\20260909-005338'
 ```
 
 ### 评审记录表(填空)

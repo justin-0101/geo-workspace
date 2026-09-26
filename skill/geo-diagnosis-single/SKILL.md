@@ -7,6 +7,11 @@ description: Stable single-batch GEO visibility diagnosis workflow for one compa
 
 稳定单批版 GEO 一次性可见度诊断。用于“一家公司、一批 8 题、4 平台、每题一次”的可见度快照。
 
+> **路径说明**：下文命令按“已把本 skill 安装到 agent 的 skill 目录”写，即
+> `$env:USERPROFILE\.agents\skills\geo-diagnosis-single`。如果你是在 [geo-workspace](https://github.com/justin-0101/geo-workspace)
+> 仓库里直接使用，把命令里的 `$env:USERPROFILE\.agents\skills\geo-diagnosis-single` 换成
+> `skill/geo-diagnosis-single`（在仓库根目录执行即可）。
+
 开始前阅读：
 
 - `references/single-batch-rules.md`
@@ -47,7 +52,7 @@ description: Stable single-batch GEO visibility diagnosis workflow for one compa
 初始化：
 
 ```powershell
-& '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\initialize-run.ps1' `
+& "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\initialize-run.ps1" `
   -ConfigPath '<company-dir>\config\run-config.json' `
   -RunsRoot '<company-dir>\runs'
 ```
@@ -55,7 +60,7 @@ description: Stable single-batch GEO visibility diagnosis workflow for one compa
 脚本会返回 `run_dir`。之后预检：
 
 ```powershell
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\geo_driver.py' preflight '<run_dir>' all
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\geo_driver.py" preflight '<run_dir>' all
 ```
 
 门禁要求：
@@ -70,15 +75,15 @@ python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\geo_driver.py'
 ## 阶段 C：执行 32 个任务
 
 ```powershell
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\geo_run.py' '<run_dir>'
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\geo_run.py" '<run_dir>'
 ```
 
 可调试小批量，但正式诊断必须完整跑完且不重试：
 
 ```powershell
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\geo_run.py' '<run_dir>' --limit 1
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\geo_run.py' '<run_dir>' --question Q01
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\geo_run.py' '<run_dir>' --platform deepseek
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\geo_run.py" '<run_dir>' --limit 1
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\geo_run.py" '<run_dir>' --question Q01
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\geo_run.py" '<run_dir>' --platform deepseek
 ```
 
 正式报告不得把调试小批量当成完整诊断。
@@ -86,7 +91,7 @@ python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\geo_run.py' '<
 ## 阶段 D/E：生成报告
 
 ```powershell
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\render-report.py' '<run_dir>'
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\render-report.py" '<run_dir>'
 ```
 
 输出：
@@ -115,7 +120,7 @@ python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\render-report.
 ## 阶段 F：最终校验
 
 ```powershell
-& '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\validate-run.ps1' -RunDir '<run_dir>'
+& "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\validate-run.ps1" -RunDir '<run_dir>'
 ```
 
 只有校验通过、任务均为 `success` 或 `failed`、报告文件存在，才能宣布完成。
@@ -127,7 +132,7 @@ python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\render-report.
 需要人工登录时：
 
 ```powershell
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\open_login.py' deepseek doubao qianwen metaso
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\open_login.py" deepseek doubao qianwen metaso
 ```
 
 默认浏览器 profile：`E:\geo-profile\UserData`。如需切换：
@@ -178,24 +183,24 @@ $env:GEO_BROWSER_USER_DATA = 'E:\geo-profiles\company-a\UserData'
 
 ```powershell
 # 1. 拓词(默认 dry-run,不污染 frozen-config)
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\expand-keywords.py' `
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\expand-keywords.py" `
   '<company-dir>\config\keywords-expansion.json' `
   --out '<run_dir>\config\expanded-questions.json'
 
 # 2. 生成 JSON-LD + llms.txt(输出到 run_dir/assets/)
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\generate-schema.py' `
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\generate-schema.py" `
   '<run_dir>' --out '<run_dir>\assets\'
 
 # 3. AI 友好度评分(默认离线,可加 --online 启用 Playwright)
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\ai-friendliness-score.py' `
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\ai-friendliness-score.py" `
   '<run_dir>'
 
 # 4. 内容资产矩阵(从 observations.jsonl 抽取)
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\content-asset-matrix.py' `
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\content-asset-matrix.py" `
   '<run_dir>'
 
 # 5. 重新渲染报告(包含新段 9-12)
-python '%USERPROFILE%\.agents\skills\geo-diagnosis-single\scripts\render-report.py' `
+python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\render-report.py" `
   '<run_dir>'
 ```
 
