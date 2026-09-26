@@ -747,8 +747,19 @@ label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:p
 .lib-ops a{color:var(--blue);text-decoration:none;font-weight:700;font-size:var(--fs-meta)}
 .lib-ops a:hover{text-decoration:underline}
 /* 稿件正文与来源：保留换行，不做 markdown 渲染（本地无渲染器，且原样展示更可核验） */
-.draft-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8;margin-top:var(--sp-4);
+/* 稿件正文：内容库用 md() 渲染后的 HTML（发布预览台也用同一套元素），不再 pre-wrap 原样显示 Markdown */
+.draft-body{overflow-wrap:anywhere;line-height:1.8;margin-top:var(--sp-4);
   padding:var(--sp-4);border:1px solid var(--line);border-radius:8px;background:var(--bg);max-height:560px;overflow:auto}
+.draft-body>*:first-child{margin-top:0}
+.draft-body p{margin:0 0 var(--sp-3)}
+.draft-body h2,.draft-body h3,.draft-body h4{margin:var(--sp-5) 0 var(--sp-2);line-height:1.45}
+.draft-body h2{font-size:18px}
+.draft-body h3{font-size:15px}
+.draft-body h4{font-size:var(--fs-note)}
+.draft-body ul,.draft-body ol{margin:0 0 var(--sp-3);padding-left:22px}
+.draft-body li{margin:4px 0}
+.draft-body code{font-family:var(--mono);font-size:.92em;background:var(--line-soft);padding:1px 5px;border-radius:4px}
+.draft-body table{margin:var(--sp-3) 0}
 .draft-sources{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--fs-meta);color:var(--muted-ink);
   padding:var(--sp-3);border-left:3px solid var(--line-strong);background:var(--bg)}
 
@@ -757,3 +768,9 @@ label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:p
 .gen-notes li{position:relative;padding:5px 0 5px 16px;line-height:1.65;overflow-wrap:anywhere}
 .gen-notes li::before{content:"·";position:absolute;left:4px;color:var(--faint)}
 .gen-notes.warn li::before{content:"△";color:var(--orange)}
+
+/* 批量发布：从内容库带过来的“这篇还没审核”提示条 */
+.pick-banner{margin:0 0 var(--sp-3);padding:var(--sp-3) var(--sp-4);font-size:var(--fs-note);line-height:1.65;
+  color:var(--notice-ink);background:var(--notice-bg);border-left:3px solid var(--orange-mark);border-radius:6px}
+.pick-banner a{color:var(--blue);font-weight:700;text-decoration:none;margin-left:6px}
+.pick-banner a:hover{text-decoration:underline}

@@ -383,6 +383,15 @@ async function render() {
      const q=ctx.quality||{errors:[],warnings:[],passed:false};
      const libRow=lib.find(x=>x.id===libAsset.id)||{};
      const meta=ctx.generation_meta||{};
+     // 发布入口必须跟着审核状态走：未审核的稿子给个能点的链接，点过去只会在批量发布页
+     // 发现它不在列表里（那边只列已审核内容），用户看到的就是「进不了发布页」。
+     // 注意：这些依赖 libAsset，必须放在 libAsset 非空的分支里（放外面会让列表页直接报错）。
+     const publishEntry=libAsset.status==='approved'
+      ?`<a class="button" href="${link('publications',chosen.slug)+'&asset='+libAsset.id}">发布安排</a>`
+      :'<button type="button" disabled title="未审核的内容不能发布">发布安排</button>';
+     const publishHint=libAsset.status==='approved'?''
+      :'<span class="muted">需先通过审核才能发布；未审核时批量发布页不会列出它</span>';
+     const openReview=()=>modal('审核内容','<label>审核人<input name="reviewer" required></label><label class="check"><input type="checkbox" required>已逐条核对正文、事实依据及公开范围</label>',async data=>{await api(base+'/content/'+libAsset.id+'/review','POST',{reviewer:data.get('reviewer'),revision:libAsset.revision,confirm:true});},'审核通过');
      const qualityHtml=q.passed
       ?'<p style="color:var(--green)">✓ 当前版本通过自动质量检查</p>'
       :`<div>${(q.errors||[]).map(x=>`<p style="color:var(--red)">● ${esc(x)}</p>`).join('')}</div>`;
@@ -393,15 +402,16 @@ async function render() {
        <section class="panel"><h2>${esc(libAsset.title)}</h2>
         <p class="muted">约 ${q.plain_length||0} 字${meta.generated_at?` · 生成于 ${esc(localTime(meta.generated_at))}`:''}${meta.engine?` · ${esc(meta.engine)}`:''}${meta.model?` / ${esc(meta.model)}`:''} · 素材 ${(ctx.sources||[]).length} 个 · 版本 ${libAsset.revision}</p>
         ${libAsset.summary?`<p>${esc(libAsset.summary)}</p>`:''}
-        <div class="draft-body">${esc(libAsset.body||'（还没有正文）')}</div>
+        <div class="draft-body">${md(libAsset.body||'（还没有正文）')}</div>
         <h3 style="margin-top:24px">来源</h3><div class="draft-sources">${esc(libAsset.facts||'（没有来源记录）')}</div>
         ${(meta.notes||[]).length?`<h3 style="margin-top:24px">生成说明</h3><ul class="gen-notes">${meta.notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}
         ${(meta.warnings||[]).length?`<ul class="gen-notes warn">${meta.warnings.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}
         <h3 style="margin-top:24px">质量检查</h3>${qualityHtml}${warnings}
         <p class="muted">有效正文约 ${q.plain_length||0} 字；最低要求 ${q.minimum_length||0} 字。审核与发布前都会重新检查。</p>
-        <div class="toolbar" style="margin-top:20px"><a class="button primary" href="${link('library',chosen.slug)+'&asset='+libAsset.id+'&mode=edit'}">编辑</a><a class="button" href="${link('publications',chosen.slug)}">发布安排</a><button type="button" class="btn-quiet" id="lib-del">删除</button></div>
+        <div class="toolbar" style="margin-top:20px"><a class="button primary" href="${link('library',chosen.slug)+'&asset='+libAsset.id+'&mode=edit'}">编辑</a>${libAsset.status==='approved'?'':`<button type="button" id="lib-review" ${q.passed?'':'disabled'}>审核当前版本</button>`}${publishEntry}${publishHint}<button type="button" class="btn-quiet" id="lib-del">删除</button></div>
        </section>`;
       $('#lib-del').onclick=()=>removeAsset(libRow.id?libRow:{id:libAsset.id,title:libAsset.title});
+      if($('#lib-review'))$('#lib-review').onclick=openReview;
      }else{
       $('#module').innerHTML=`${head}
        <form id="lib-form" class="panel">
@@ -414,12 +424,12 @@ async function render() {
         ${(meta.warnings||[]).length?`<ul class="gen-notes warn">${meta.warnings.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}
         <h3 style="margin-top:24px">质量检查</h3>${qualityHtml}${warnings}
         <p class="muted">有效正文约 ${q.plain_length||0} 字；最低要求 ${q.minimum_length||0} 字。保存后原审核会失效。</p>
-        <div class="toolbar" style="margin-top:20px"><button class="primary">保存草稿</button><button type="button" id="lib-review" ${q.passed?'':'disabled'}>审核当前版本</button><a class="button" href="${link('publications',chosen.slug)}">发布安排</a><button type="button" id="lib-regen">重新生成初稿</button><a class="button" href="${link('content',chosen.slug)+'&asset='+libAsset.id}">回任务书与素材</a></div>
+        <div class="toolbar" style="margin-top:20px"><button class="primary">保存草稿</button><button type="button" id="lib-review" ${q.passed?'':'disabled'}>审核当前版本</button>${publishEntry}${publishHint}<button type="button" id="lib-regen">重新生成初稿</button><a class="button" href="${link('content',chosen.slug)+'&asset='+libAsset.id}">回任务书与素材</a></div>
        </form>`;
       const form=$('#lib-form');
       const values=()=>{const o=Object.fromEntries(new FormData(form));return {title:o.title,summary:o.summary,body:o.body,revision:libAsset.revision};};
       form.onsubmit=async e=>{e.preventDefault();try{const out=await api(base+'/content/'+libAsset.id,'PUT',values());await render();notice(`已保存（版本 ${out.revision}），原审核已失效`);}catch(err){notice(err.message);}};
-      $('#lib-review').onclick=()=>{const v=values();const dirty=['title','summary','body'].some(k=>String(v[k]||'')!==String(libAsset[k]||''));if(dirty){notice('请先保存修改并重新通过质量检查');return;}modal('审核内容','<label>审核人<input name="reviewer" required></label><label class="check"><input type="checkbox" required>已逐条核对正文、事实依据及公开范围</label>',async data=>{await api(base+'/content/'+libAsset.id+'/review','POST',{reviewer:data.get('reviewer'),revision:libAsset.revision,confirm:true});},'审核通过');};
+      $('#lib-review').onclick=()=>{const v=values();const dirty=['title','summary','body'].some(k=>String(v[k]||'')!==String(libAsset[k]||''));if(dirty){notice('请先保存修改并重新通过质量检查');return;}openReview();};
       $('#lib-regen').onclick=()=>modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',async()=>{const out=await api(base+'/content/'+libAsset.id+'/generate','POST',{revision:libAsset.revision,confirm_overwrite:true});return {message:`已重新生成（约 ${(out.quality||{}).plain_length||0} 字，引擎 ${out.engine}）`};},'确认覆盖并生成');
      }
     }
@@ -446,6 +456,11 @@ async function render() {
 
     const approved=assets.filter(a=>a.status==='approved');
     const drafts=assets.filter(a=>a.status!=='approved');
+    // 从内容库某篇稿件的「发布安排」进来时带着 asset：
+    // 已审核 → 直接勾上；未审核 → 说清它为什么不在列表里，不能就这么少一条。
+    const wantAsset=params.get('asset');
+    const wantRow=wantAsset?assets.find(a=>a.id===wantAsset):null;
+    if(wantRow&&wantRow.status==='approved')picked.add(wantRow.id);
     const platById=id=>LIVE.caps.find(p=>p.id===id);
     const lState=id=>(LIVE.loginState.states||{})[id]||{};
     const isLogged=id=>lState(id).state==='logged_in';
@@ -639,6 +654,7 @@ async function render() {
               <button type="button" class="linkish" id="clear-assets">清空</button>
             </div>
           </div>
+          ${wantRow&&wantRow.status!=='approved'?`<p class="pick-banner">《${esc(wantRow.title)}》还没有通过审核，所以不在这里。未审核的内容不能发布。<a href="${link('library',chosen.slug)+'&asset='+wantRow.id+'&mode=edit'}">去内容库审核</a></p>`:''}
           <div class="pick-list">${approved.map(a=>`
             <div class="pick-row" data-asset-row="${a.id}">
               <input type="checkbox" name="pick-asset" id="asset-${a.id}" value="${a.id}" ${picked.has(a.id)?'checked':''}>
@@ -669,7 +685,7 @@ async function render() {
         </section>
       </div>
       <div class="submit-bar" id="submitbar"></div>`;
-      if(!approved.length) $('#col-assets .pick-list').innerHTML='<p class="pick-list-tail">还没有已审核内容。到「内容生产」写完并审核后再来。</p>';
+      if(!approved.length) $('#col-assets .pick-list').innerHTML=`<p class="pick-list-tail">还没有已审核内容。${drafts.length?`当前有 ${drafts.length} 篇草稿，`:'到「内容生产」写完并审核后再来。'}在<a href="${link('library',chosen.slug)}">内容库</a>审核通过后才能发布。</p>`;
       const sync=()=>{
         approved.forEach(a=>{const b=$('#asset-'+a.id);if(b)b.checked=picked.has(a.id);});
         LIVE.caps.forEach(p=>{const b=$('#col-platforms input[value="'+p.id+'"]');if(b)b.checked=plats.has(p.id);});

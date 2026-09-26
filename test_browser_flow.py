@@ -124,8 +124,15 @@ def main():
                     expect(page.get_by_role('heading',name='内容库',exact=True)).to_be_visible()
                     expect(page.locator('.draft-body')).to_contain_text('ISO 9001')
                     expect(page.locator('.draft-sources')).to_contain_text('隔离测试产品说明.md')
-                    expect(page.get_by_role('button',name='审核当前版本')).to_have_count(0)   # 查看模式不直接给审核
-                    checks.append('materials upload, paste, generate, then jump to the library')
+                    # 正文是 Markdown，查看时必须渲染，不能把 ## / ** 原样显示给用户
+                    expect(page.locator('.draft-body h2, .draft-body h3')).not_to_have_count(0)
+                    expect(page.locator('.draft-body')).not_to_contain_text('## ')
+                    # 未审核的稿子不能发布：入口要禁用并说明，不能给一个点了没用的链接
+                    expect(page.locator('#module a', has_text='发布安排')).to_have_count(0)
+                    expect(page.get_by_role('button', name='发布安排', exact=True)).to_be_disabled()
+                    expect(page.locator('#module')).to_contain_text('需先通过审核才能发布')
+                    expect(page.get_by_role('button', name='审核当前版本', exact=True)).to_be_enabled()
+                    checks.append('draft is blocked from publishing until reviewed, and markdown renders')
                     # 内容库列表：序号 / 生成时间 / 操作三件套
                     page.get_by_role('link',name='返回内容库',exact=True).click()
                     row=page.locator('tr[data-lib]').first
@@ -146,9 +153,13 @@ def main():
                     page.get_by_role('button',name='审核通过',exact=True).click()
                     expect(page.get_by_text('已审核',exact=True).first).to_be_visible()
                     checks.append('library edit then review')
+                    expect(page.locator('#module a', has_text='发布安排')).to_have_count(1)   # 审核通过后才变真链接
                     page.get_by_role('link',name='发布安排',exact=True).click()
                     expect(page.get_by_role('heading',name='批量发布',exact=True)).to_be_visible()
                     expect(page.locator('.gate')).to_be_visible()
+                    expect(page.locator('[name="pick-asset"]:checked')).to_have_count(1)      # 带着 asset 过来自动勾上
+                    expect(page.locator('.pick-banner')).to_have_count(0)                      # 已审核，不该再提示未审核
+                    checks.append('approved draft arrives pre-selected on the publish page')
                     page.locator('input[name="pick-asset"]').first.check()
                     page.locator('input[name="pick-platform"][value="baike"]').check()
                     page.locator('#publish').click()
