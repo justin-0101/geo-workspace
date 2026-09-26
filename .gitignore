@@ -1,0 +1,8 @@
+# 本机备份与运行产物：不入库
+# backups/ 里是改前的旧脚本（含已修掉的历史 bug 文案），只留本机
+backups/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log

@@ -1,0 +1,156 @@
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "#org",
+      "name": "CHANGE_ME: 品牌标准全称,如'示例财税代理服务有限公司'",
+      "alternateName": [
+        "CHANGE_ME: 简称 1,如'示例财税'",
+        "CHANGE_ME: 简称 2,如'示例代理记账'"
+      ],
+      "url": "https://CHANGE_ME.com",
+      "logo": "https://CHANGE_ME.com/logo.png",
+      "description": "CHANGE_ME: 公司一句话简介(60 字以内,含地域+行业+差异化优势)",
+      "foundingDate": "CHANGE_ME: ISO 日期,如'2015-03-01'",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "CHANGE_ME: 街道地址,如'天河路 123 号 XX 大厦 8 楼 801'",
+        "addressLocality": "CHANGE_ME: 城市,如'广州市'",
+        "addressRegion": "CHANGE_ME: 区,如'天河区'",
+        "postalCode": "CHANGE_ME: 邮编,如'510000'",
+        "addressCountry": "CN"
+      },
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "telephone": "+86-XXX-XXXX-XXXX",
+        "contactType": "customer service",
+        "areaServed": "CN",
+        "availableLanguage": ["zh-Hans"]
+      },
+      "sameAs": [
+        "https://CHANGE_ME: 抖音号链接",
+        "https://CHANGE_ME: 头条号链接",
+        "https://CHANGE_ME: 知乎机构号链接"
+      ]
+    },
+    {
+      "@type": "LocalBusiness",
+      "@id": "#local",
+      "name": "CHANGE_ME: 商家名称(可与 Organization 相同)",
+      "parentOrganization": {"@id": "#org"},
+      "url": "https://CHANGE_ME.com",
+      "image": "https://CHANGE_ME.com/storefront.jpg",
+      "telephone": "+86-XXX-XXXX-XXXX",
+      "priceRange": "¥¥",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "CHANGE_ME: 街道地址",
+        "addressLocality": "CHANGE_ME: 城市",
+        "addressRegion": "CHANGE_ME: 区",
+        "postalCode": "CHANGE_ME: 邮编",
+        "addressCountry": "CN"
+      },
+      "areaServed": [
+        {"@type": "City", "name": "CHANGE_ME: 服务城市 1"},
+        {"@type": "City", "name": "CHANGE_ME: 服务城市 2"}
+      ],
+      "openingHoursSpecification": [
+        {
+          "@type": "OpeningHoursSpecification",
+          "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+          "opens": "09:00",
+          "closes": "18:00"
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "CHANGE_ME: 问题 1,如'代理记账一般多少钱?'",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "CHANGE_ME: 答案 1(200 字以内,含具体价格区间)"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "CHANGE_ME: 问题 2,如'小规模 vs 一般纳税人代账费用?'",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "CHANGE_ME: 答案 2(200 字以内)"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "CHANGE_ME: 问题 3,如'低价代账有哪些风险?'",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "CHANGE_ME: 答案 3(200 字以内)"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "CHANGE_ME: 问题 4,如'如何选择靠谱的代账公司?'",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "CHANGE_ME: 答案 4(200 字以内)"
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "CHANGE_ME: 问题 5,如'金税四期下常见涉税风险?'",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "CHANGE_ME: 答案 5(200 字以内)"
+          }
+        }
+      ]
+    },
+    {
+      "@type": "Service",
+      "@id": "#svc-1",
+      "name": "CHANGE_ME: 服务名称 1,如'小规模纳税人代理记账'",
+      "serviceType": "CHANGE_ME: 服务类型,如'财税代理'",
+      "provider": {"@id": "#org"},
+      "areaServed": "CHANGE_ME: 服务区域",
+      "description": "CHANGE_ME: 服务说明(100 字以内,含价格区间+适用对象)",
+      "offers": {
+        "@type": "Offer",
+        "price": "CHANGE_ME: 起步价,如'200'",
+        "priceCurrency": "CNY",
+        "priceSpecification": {
+          "@type": "UnitPriceSpecification",
+          "price": "CHANGE_ME: 月单价,如'200-500'",
+          "priceCurrency": "CNY",
+          "referenceQuantity": {"@type": "QuantitativeValue", "value": "1", "unitText": "月"}
+        }
+      }
+    },
+    {
+      "@type": "Service",
+      "@id": "#svc-2",
+      "name": "CHANGE_ME: 服务名称 2,如'工商注册代办'",
+      "serviceType": "CHANGE_ME: 服务类型",
+      "provider": {"@id": "#org"},
+      "areaServed": "CHANGE_ME: 服务区域",
+      "description": "CHANGE_ME: 服务说明",
+      "offers": {
+        "@type": "Offer",
+        "price": "CHANGE_ME: 起步价",
+        "priceCurrency": "CNY"
+      }
+    },
+    {
+      "@type": "Review",
+      "author": {"@type": "Person", "name": "CHANGE_ME: 客户姓名(经授权使用)"},
+      "datePublished": "CHANGE_ME: ISO 日期,如'2025-08-15'",
+      "reviewBody": "CHANGE_ME: 客户真实评价(必须来自公开第三方平台,不得伪造,需包含具体事实细节)",
+      "reviewRating": {"@type": "Rating", "ratingValue": "5", "bestRating": "5"},
+      "itemReviewed": {"@id": "#org"}
+    }
+  ]
+}

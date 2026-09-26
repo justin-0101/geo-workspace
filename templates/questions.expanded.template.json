@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "based_on": "questions.tax-agency.json",
+  "expansion_method": "GEORank 4 层拓词法:业务词→问题词→场景词→意图词→推荐型关键词",
+  "questions": [
+    {"id": "Q01", "parent": null, "type": "non_brand", "business_value": "high", "keyword_layer": "intent", "prompt": "我们公司注册在广州市天河区,是刚起步的小微企业,想找一家本地靠谱的代理记账公司长期合作。广州有哪些做得比较专业、口碑好的财税服务商?请推荐 3 家并说明各自适合什么样的企业。"},
+    {"id": "Q02", "parent": null, "type": "non_brand", "business_value": "high", "keyword_layer": "intent", "prompt": "广州代理记账一般怎么收费?小规模纳税人和一般纳税人一年的代账费用大概是多少?选择收费明显偏低的代账服务通常会有哪些风险?"},
+    {"id": "Q03", "parent": null, "type": "non_brand", "business_value": "high", "keyword_layer": "comparison", "prompt": "中小企业做账报税,找本地代理记账公司和招一名专职会计或全职财务团队相比,各有什么利弊?什么阶段、什么类型企业更适合选代理记账?"},
+    {"id": "Q04", "parent": null, "type": "non_brand", "business_value": "medium", "keyword_layer": "question", "prompt": "广州的公司如果出现经营异常(如未按时年报、注册地址失联、税务非正常户),一般是什么原因、对公司有什么影响?应该怎么处理才能恢复正常?"},
+    {"id": "Q05", "parent": null, "type": "non_brand", "business_value": "medium", "keyword_layer": "scenario", "prompt": "金税四期全面上线后,中小企业的常见涉税风险有哪些(比如缺成本票、公转私、股东分红个税)?规范的代理记账公司一般会怎么帮客户规避这些风险?"},
+    {"id": "Q06", "parent": null, "type": "brand_cognition", "business_value": "high", "keyword_layer": "business", "prompt": "示例财税代理服务有限公司是做什么的?主要服务哪些客户,在代理记账、财税风控方面有什么特色和优势?"},
+    {"id": "Q07", "parent": null, "type": "brand_cognition", "business_value": "medium", "keyword_layer": "scenario", "prompt": "广州天河区的示例财税(示例财税代理服务有限公司)怎么样?它家的代理记账和税务风险复核服务,适合什么样的小微企业?"},
+    {"id": "Q08", "parent": null, "type": "comparison", "business_value": "high", "keyword_layer": "comparison", "prompt": "企业做代理记账报税,在广州选示例财税这类本地财税公司和选猪八戒财税、慧算账这类全国性财税平台,各有什么利弊?本地小微企业和电商、贸易类公司该怎么选?"},
+    {"id": "QE01", "parent": "Q01", "type": "non_brand", "business_value": "high", "keyword_layer": "intent", "prompt": "广州天河区小微企业选代理记账公司,有什么推荐标准和避坑指南?请推荐 3 家并说明适合什么样的企业。"},
+    {"id": "QE02", "parent": "Q01", "type": "non_brand", "business_value": "high", "keyword_layer": "recommendation", "prompt": "广州电商公司找代理记账,有哪些专门做电商财税的服务商值得推荐?分别适合多大规模的电商团队?"},
+    {"id": "QE03", "parent": "Q01", "type": "non_brand", "business_value": "medium", "keyword_layer": "scenario", "prompt": "刚成立 3 个月的初创公司,在广州选代账公司应该关注什么?有没有适合初创团队的合作模式?"},
+    {"id": "QE04", "parent": "Q01", "type": "non_brand", "business_value": "medium", "keyword_layer": "business", "prompt": "代理记账公司一般提供哪些服务?除了记账报税还会做哪些事?"},
+    {"id": "QE05", "parent": "Q02", "type": "non_brand", "business_value": "high", "keyword_layer": "intent", "prompt": "小规模纳税人找代账公司一般多少钱一个月?广州的市场价格大概是多少?包含哪些服务?"},
+    {"id": "QE06", "parent": "Q02", "type": "non_brand", "business_value": "high", "keyword_layer": "scenario", "prompt": "一般纳税人(年开票 500 万以上)找代账公司,一年大概多少费用?和小规模有什么区别?"},
+    {"id": "QE07", "parent": "Q02", "type": "non_brand", "business_value": "medium", "keyword_layer": "question", "prompt": "代账公司收费低于 100 元/月会有哪些风险?低价代账常见的服务陷阱有哪些?"},
+    {"id": "QE08", "parent": "Q05", "type": "non_brand", "business_value": "medium", "keyword_layer": "scenario", "prompt": "电商公司在金税四期下常见的涉税风险(平台流水合规、刷单补税、股东分红等)有哪些?代账公司会怎么帮电商客户规避?"}
+  ]
+}
