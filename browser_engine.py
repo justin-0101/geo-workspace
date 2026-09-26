@@ -4,6 +4,7 @@ No legacy database/config/profile is used. Only pending tasks may be submitted.
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -162,6 +163,30 @@ def incomplete_tasks(path):
     return problems
 
 
+def text_check_failures(path):
+    """报告文案体检：命中「不属于本主体」的行业词时返回词条列表（空列表=通过）。
+
+    render-report.py 无论通过与否都会写 report/TEXT_CHECK.md；这里只读结论。
+    缺这个文件视为「没跑过体检」（旧批次），返回空列表，不让历史批次全部变 degraded。
+    """
+    file = Path(path)/'report'/'TEXT_CHECK.md'
+    if not file.is_file():
+        return []
+    text = file.read_text(encoding='utf-8-sig', errors='replace')
+    if '状态：FAIL' not in text:
+        return []
+    hits = []
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip().strip('|').split('|')]
+        if len(cells) < 3 or cells[0] in {'文件'} or set(cells[1]) <= set('-: '):
+            continue
+        hits.append(f"{cells[1]}（{cells[0]}）")
+    if not hits:
+        # 标了 FAIL 却读不到词条：宁可当成有问题，也不要静默放过。
+        return ['（状态：FAIL，但未解析到具体词条，请人工查看 report/TEXT_CHECK.md）']
+    return sorted(dict.fromkeys(hits))
+
+
 def close_profile_processes():
     """Terminate leftover Chrome instances bound to our isolated profile."""
     pids = profile_processes()
@@ -293,14 +318,19 @@ def _worker(job):
             validation = ['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(SCRIPTS/'validate-run.ps1'),'-RunDir',str(path)]
             code = _run(job,validation,180)
             if not job['stopped']:
-                if code == 0:
-                    transition(slug,rid,'completed')
-                else:
+                leaks = text_check_failures(path)
+                if code != 0:
                     problems = incomplete_tasks(path)
                     detail = '、'.join(problems[:4]) if problems else '结果校验未通过'
                     transition(slug,rid,'degraded',
                                f'报告已生成，但 {len(problems) or 1} 个任务的证据不完整：{detail}。'
                                '可以查看报告与证据、从完整观测生成改善任务；已提交的问题不得重试')
+                elif leaks:
+                    transition(slug,rid,'degraded',
+                               f'报告已生成，但文案体检发现 {len(leaks)} 处与本次主体无关的行业词：{"、".join(leaks[:5])}。'
+                               '请核对 report/TEXT_CHECK.md；确认是模板残留就修渲染脚本后重新生成报告，不要直接对外交付')
+                else:
+                    transition(slug,rid,'completed')
     except Exception as exc:
         if not job['stopped']: transition(slug,rid,'interrupted','诊断执行异常：'+str(exc)[:250])
     finally:

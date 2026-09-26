@@ -71,7 +71,11 @@ def freeze_config(profile, questions, platform_ids):
     return dict(brand=dict(canonical_name=profile['canonical_name'].strip(), aliases=aliases,
                           official_pages=pages, official_domains=sorted({urlparse(p).hostname for p in pages}),
                           no_official_web_presence=profile.get('no_official_web_presence') is True,
-                          known_competitors=profile.get('competitors', [])),
+                          known_competitors=profile.get('competitors', []),
+                          # 报告渲染只允许用本项目自己的事实；有这几个字段，文案就落到本主体，
+                          # 而不是回落到某个写死的行业模板（跨主体文案泄漏的根因）。
+                          business=profile['business'].strip(), region=profile['region'].strip(),
+                          audience=profile['audience'].strip()),
                 scope=dict(repetitions=1, expected_questions=8, expected_platforms=len(platforms),
                            expected_tasks=8*len(platforms), questions=questions),
                 platforms=platforms, evidence=dict(save_screenshot=True,

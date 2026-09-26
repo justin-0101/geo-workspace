@@ -144,3 +144,35 @@ class EngineTests(WorkspaceTests):
         self.assertEqual(run['status'],'blocked')
         self.assertIn('待登录',run['blocker'])
         with self.assertRaises(ValueError):create_frozen_run('test-a',1,True)
+
+    def finish_all_tasks(self,path):
+        tasks=[]
+        for line in (path/'tasks.jsonl').read_text(encoding='utf8').splitlines():
+            if line.strip():
+                task=json.loads(line);task['status']='success';tasks.append(task)
+        (path/'tasks.jsonl').write_text(''.join(json.dumps(t,ensure_ascii=False)+'\n' for t in tasks),encoding='utf8')
+
+    def test_report_text_leak_is_not_marked_completed(self):
+        """真事故：共享渲染器写死的财税文案进了别的项目的报告。
+
+        文案体检 FAIL 时必须标 degraded：不能把「包含他主体行业词」的报告当完整报告交付。
+        """
+        rid=self.frozen();path=verify_frozen_run('test-a',rid)
+        self.finish_all_tasks(path)
+        (path/'report'/'TEXT_CHECK.md').write_text(
+            '# 报告文案体检\n\n- 状态：FAIL\n\n| 文件 | 命中词 | 出现位置 |\n|---|---|---|\n'
+            '| diagnosis.md | 代账 | - P1：低价代账风险 |\n',encoding='utf8')
+        job=dict(slug='test-a',run_id=rid,path=path,mode='report',stopped=False,process=None)
+        with patch.object(engine,'_run',return_value=0):engine._worker(job)
+        run=engine.get_run('test-a',rid)
+        self.assertEqual(run['status'],'degraded')
+        self.assertIn('文案体检',run['blocker'])
+        self.assertIn('代账',run['blocker'])
+
+    def test_report_text_pass_still_completes(self):
+        rid=self.frozen();path=verify_frozen_run('test-a',rid)
+        self.finish_all_tasks(path)
+        (path/'report'/'TEXT_CHECK.md').write_text('# 报告文案体检\n\n- 状态：PASS\n',encoding='utf8')
+        job=dict(slug='test-a',run_id=rid,path=path,mode='report',stopped=False,process=None)
+        with patch.object(engine,'_run',return_value=0):engine._worker(job)
+        self.assertEqual(engine.get_run('test-a',rid)['status'],'completed')
