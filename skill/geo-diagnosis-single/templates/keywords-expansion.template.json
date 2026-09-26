@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "base_industry": "CHANGE_ME: 行业/业务对象,如'财税代理/代理记账/工商商事服务'",
+  "base_region": "CHANGE_ME: 主要服务区域,如'广州天河区/海珠区/越秀区'",
+  "brand_canonical": "CHANGE_ME: 品牌标准全称,如'示例财税代理服务有限公司'",
+  "layers": {
+    "business_words": [
+      "CHANGE_ME: 业务词 1,如'代理记账'",
+      "CHANGE_ME: 业务词 2,如'工商注册'",
+      "CHANGE_ME: 业务词 3,如'公司变更'"
+    ],
+    "question_words": [
+      "CHANGE_ME: 问题词 1,如'代理记账多少钱'",
+      "CHANGE_ME: 问题词 2,如'代理记账怎么选'"
+    ],
+    "scenario_words": [
+      "CHANGE_ME: 场景词 1,如'小微企业代理记账'",
+      "CHANGE_ME: 场景词 2,如'电商公司代理记账'"
+    ],
+    "intent_words": [
+      "CHANGE_ME: 意图词 1,如'推荐/哪家好/排行/对比'",
+      "CHANGE_ME: 意图词 2,如'多少钱/收费/价格'",
+      "CHANGE_ME: 意图词 3,如'风险/避坑/注意'",
+      "CHANGE_ME: 意图词 4,如'靠谱/专业/正规'"
+    ],
+    "recommendation_keywords": [
+      "CHANGE_ME: 推荐型关键词 1,如'广州天河代理记账推荐'",
+      "CHANGE_ME: 推荐型关键词 2,如'广州小微企业代理记账哪家好'",
+      "CHANGE_ME: 推荐型关键词 3,如'广州天河工商注册推荐'",
+      "CHANGE_ME: 推荐型关键词 4,如'广州代理记账排行'",
+      "CHANGE_ME: 推荐型关键词 5,如'广州电商公司代账推荐'"
+    ]
+  },
+  "expanded_questions": [
+    {
+      "id": "QE01",
+      "parent": "Q01",
+      "type": "non_brand",
+      "business_value": "high",
+      "keyword_layer": "intent",
+      "prompt": "CHANGE_ME: 基于业务词+意图词生成的非品牌高意图问题 1(不出现品牌词/别名/网址)"
+    },
+    {
+      "id": "QE02",
+      "parent": "Q01",
+      "type": "non_brand",
+      "business_value": "high",
+      "keyword_layer": "recommendation",
+      "prompt": "CHANGE_ME: 推荐型高意图问题 2"
+    },
+    {
+      "id": "QE03",
+      "parent": "Q01",
+      "type": "non_brand",
+      "business_value": "medium",
+      "keyword_layer": "scenario",
+      "prompt": "CHANGE_ME: 场景型问题 3"
+    },
+    {
+      "id": "QE04",
+      "parent": "Q01",
+      "type": "non_brand",
+      "business_value": "medium",
+      "keyword_layer": "business",
+      "prompt": "CHANGE_ME: 业务型问题 4"
+    },
+    {
+      "id": "QE05",
+      "parent": "Q02",
+      "type": "non_brand",
+      "business_value": "high",
+      "keyword_layer": "intent",
+      "prompt": "CHANGE_ME: 价格类意图问题 5"
+    },
+    {
+      "id": "QE06",
+      "parent": "Q02",
+      "type": "non_brand",
+      "business_value": "high",
+      "keyword_layer": "scenario",
+      "prompt": "CHANGE_ME: 价格+场景类问题 6"
+    },
+    {
+      "id": "QE07",
+      "parent": "Q02",
+      "type": "non_brand",
+      "business_value": "medium",
+      "keyword_layer": "question",
+      "prompt": "CHANGE_ME: 价格避坑问题 7"
+    },
+    {
+      "id": "QE08",
+      "parent": "Q05",
+      "type": "non_brand",
+      "business_value": "medium",
+      "keyword_layer": "scenario",
+      "prompt": "CHANGE_ME: 风险+场景类问题 8"
+    }
+  ]
+}

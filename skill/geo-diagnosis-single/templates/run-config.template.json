@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "project_name": "CHANGE_ME：公司名 GEO 一次性可见度诊断",
+  "brand": {
+    "canonical_name": "CHANGE_ME：品牌/公司标准全称",
+    "aliases": [
+      "CHANGE_ME：明确且唯一的品牌简称"
+    ],
+    "official_domains": [],
+    "official_pages": [],
+    "no_official_web_presence": false,
+    "known_competitors": [],
+    "business": "CHANGE_ME：主营业务/服务对象（可选但建议填，报告文案只会用它，不会套用其他行业）",
+    "region": "CHANGE_ME：服务区域（可选）",
+    "audience": "CHANGE_ME：目标客户（可选）"
+  },
+  "scope": {
+    "repetitions": 1,
+    "expected_questions": 8,
+    "expected_platforms": 4,
+    "expected_tasks": 32,
+    "questions": [
+      {"id": "Q01", "type": "non_brand", "business_value": "high", "layer": "query-intent", "subcat": "recommendation", "intent": "购买决策/推荐", "time_sensitivity": "low", "trigger_intensity": "high", "prompt": "CHANGE_ME：第1道非品牌高意图问题，不能含品牌名/别名/网址"},
+      {"id": "Q02", "type": "non_brand", "business_value": "high", "layer": "query-intent", "subcat": "pricing", "intent": "预算/收费", "time_sensitivity": "medium", "trigger_intensity": "medium", "prompt": "CHANGE_ME：第2道非品牌高意图问题，不能含品牌名/别名/网址"},
+      {"id": "Q03", "type": "non_brand", "business_value": "high", "layer": "query-intent", "subcat": "alternative-comparison", "intent": "替代方案比较", "time_sensitivity": "low", "trigger_intensity": "medium", "prompt": "CHANGE_ME：第3道非品牌高意图问题，不能含品牌名/别名/网址"},
+      {"id": "Q04", "type": "non_brand", "business_value": "medium", "layer": "edge-real-world", "subcat": "risk-scenario", "intent": "真实场景/避坑", "time_sensitivity": "medium", "trigger_intensity": "medium", "prompt": "CHANGE_ME：第4道非品牌中意图问题，不能含品牌名/别名/网址"},
+      {"id": "Q05", "type": "non_brand", "business_value": "medium", "layer": "time-sensitivity", "subcat": "policy-or-trend", "intent": "行业热点/风险", "time_sensitivity": "high", "trigger_intensity": "medium", "prompt": "CHANGE_ME：第5道非品牌中意图问题，不能含品牌名/别名/网址"},
+      {"id": "Q06", "type": "brand_cognition", "business_value": "high", "layer": "query-intent", "subcat": "brand-identity", "intent": "品牌认知", "time_sensitivity": "low", "trigger_intensity": "low", "prompt": "CHANGE_ME：品牌认知题，可含品牌全称"},
+      {"id": "Q07", "type": "brand_cognition", "business_value": "medium", "layer": "query-intent", "subcat": "brand-reputation", "intent": "口碑/适用对象", "time_sensitivity": "medium", "trigger_intensity": "low", "prompt": "CHANGE_ME：品牌评价/适用对象题，可含品牌别名"},
+      {"id": "Q08", "type": "comparison", "business_value": "high", "layer": "query-intent", "subcat": "competitive-comparison", "intent": "品牌/竞品对比", "time_sensitivity": "low", "trigger_intensity": "high", "prompt": "CHANGE_ME：品牌或竞品对比题，可含品牌名和竞品名"}
+    ]
+  },
+  "platforms": [
+    {"id": "deepseek", "label": "DeepSeek", "entry_url": "https://chat.deepseek.com/", "required_mode": "DeepSeek 默认对话模型（最新版）", "login_required": true},
+    {"id": "doubao", "label": "豆包", "entry_url": "https://www.doubao.com/chat/", "required_mode": "豆包默认助手，确认联网搜索状态", "login_required": true},
+    {"id": "qianwen", "label": "千问", "entry_url": "https://www.qianwen.com/", "required_mode": "千问默认助手（www.qianwen.com）", "login_required": true},
+    {"id": "metaso", "label": "秘塔", "entry_url": "https://metaso.cn/", "required_mode": "秘塔默认联网搜索模式", "login_required": true}
+  ],
+  "automation": {
+    "execution_order": "question_major",
+    "fresh_conversation": true,
+    "submit_once": true,
+    "allow_follow_up": false,
+    "allow_regenerate": false,
+    "allow_retry_after_submission": false,
+    "stop_on_manual_gate": true,
+    "browser_tool_required": true,
+    "response_timeout_seconds": 180,
+    "language": "zh-CN",
+    "region": "CN"
+  },
+  "evidence": {
+    "save_full_response_text": true,
+    "save_visible_source_links": true,
+    "save_screenshot": true,
+    "screenshot_must_include_question": true,
+    "screenshot_must_include_full_answer": true
+  }
+}
