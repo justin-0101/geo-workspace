@@ -14,7 +14,19 @@ import workspace_store as store
 from diagnosis_runs import verify_frozen_run, get_run
 from process_guard import ProcessGuard
 
-SCRIPTS = Path(os.environ.get('GEO_REDESIGN_ENGINE', str(Path.home()/'.agents/skills/geo-diagnosis-single/scripts')))
+def _default_scripts():
+    """引擎脚本位置：优先本仓库内的 skill/geo-diagnosis-single/scripts，
+    其次本机已安装的 ~/.agents/skills/geo-diagnosis-single/scripts。
+
+    开发机上两者是同一份（home 那个是指向仓库的目录联接），外部分发时只用仓库内这份。
+    """
+    in_repo = store.ROOT / 'skill' / 'geo-diagnosis-single' / 'scripts'
+    if (in_repo / 'geo_driver.py').is_file():
+        return in_repo
+    return Path.home() / '.agents' / 'skills' / 'geo-diagnosis-single' / 'scripts'
+
+
+SCRIPTS = Path(os.environ.get('GEO_REDESIGN_ENGINE') or _default_scripts())
 _LOCK = threading.Lock()
 _ACTIVE = None
 

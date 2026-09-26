@@ -14,7 +14,7 @@
 ## 隔离与启动
 
 新版独立数据库：`data/redesign.db`；诊断文件：`data/runs/<id>/`；浏览器：`data/browser-profile/`。
-不读取或迁移原版数据库、客户配置、runs 或登录 profile。仅调用已安装的通用诊断 skill 代码。
+不读取或迁移原版数据库、客户配置、runs 或登录 profile。诊断引擎就在本仓库 `skill/geo-diagnosis-single/`（同一份代码也通过目录联接暴露给本机 agent 的 skill 发现机制）。
 
 使用包含 FastAPI、Uvicorn、Playwright、httpx 的 Python 环境。当前机器已验证的解释器：
 `python`
@@ -104,7 +104,7 @@
 - **平台对比表**、**引用来源域名分布**（最多 8 个）、**报告边界**。
 - 右上「查看报告」按钮直接打开该批次 `diagnosis.md`。
 
-版面依据：对比过的开源参考是 GEORank（`references/georank-7-module-alignment.md`，仓库只公开模块划分、无布局规范），实际采用的是本机已有的 `anti-slop-preflight` 规范（对标 taste-skill）。它明确禁止“3/4 列等宽卡片”“emoji 当 UI 图标”“居中堆叠”，因此摈弃了原先的 4 等宽 KPI 卡，改为结论带 + 非对称栅格（主指标 1.7fr / 轴助 1fr），并提高信息密度。
+版面依据：对比过的开源参考是 GEORank（`skill/geo-diagnosis-single/references/georank-7-module-alignment.md`，仓库只公开模块划分、无布局规范），实际采用的是本机已有的 `anti-slop-preflight` 规范（对标 taste-skill）。它明确禁止“3/4 列等宽卡片”“emoji 当 UI 图标”“居中堆叠”，因此摈弃了原先的 4 等宽 KPI 卡，改为结论带 + 非对称栅格（主指标 1.7fr / 轴助 1fr），并提高信息密度。
 
 ### 内容生产：两种入口
 
