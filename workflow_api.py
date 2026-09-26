@@ -3,13 +3,15 @@ from contextlib import asynccontextmanager
 import json
 import uuid
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from typing import Optional
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import workspace_store as store
 import browser_engine as engine
 import editorial_flow as editorial
+import source_materials as materials
 import publish_adapters as adapters
 import platform_login
 from diagnosis_config import DIAGNOSIS_PLATFORMS, PUBLISH_PLATFORMS, suggest_questions
@@ -22,6 +24,8 @@ async def lifespan(app):
     guard=ProcessGuard(store.DATA/'service.lock').acquire()
     try:
         store.migrate()
+        # 重启后不可能还有 OCR 线程在跑，把卡住的状态放回可重试
+        materials.reset_stuck_ocr()
         # A restarted server cannot claim an old subprocess is still controlled.
         with store.connection() as c:
             c.execute("UPDATE execution_runs SET status='interrupted',blocker='服务已重启，请核对进度后继续' WHERE status IN ('running','preflight','login')")
@@ -208,10 +212,35 @@ class ManualContentInput(BaseModel):
 
 
 class AssetInput(BaseModel):
-    title: str
+    """All optional except title/body/revision so partial edits never wipe auto-filled fields."""
+    title: str = Field(min_length=1, max_length=200)
     body: str
-    facts: str
     revision: int
+    summary: Optional[str] = Field(default=None, max_length=1000)
+    facts: Optional[str] = None
+    brief: Optional[str] = Field(default=None, max_length=4000)
+    channel: Optional[str] = Field(default=None, max_length=100)
+    audience: Optional[str] = Field(default=None, max_length=500)
+    objective: Optional[str] = Field(default=None, max_length=1000)
+    tone: Optional[str] = Field(default=None, max_length=200)
+    keywords: Optional[str] = Field(default=None, max_length=1000)
+    target_length: Optional[int] = Field(default=None, ge=200, le=10000)
+    cover: Optional[str] = Field(default=None, max_length=2000)
+
+
+class GenerateInput(BaseModel):
+    revision: int
+    confirm_overwrite: bool = False
+    brief: Optional[str] = Field(default=None, max_length=4000)
+    channel: Optional[str] = Field(default=None, max_length=100)
+    audience: Optional[str] = Field(default=None, max_length=500)
+    objective: Optional[str] = Field(default=None, max_length=1000)
+    tone: Optional[str] = Field(default=None, max_length=200)
+    keywords: Optional[str] = Field(default=None, max_length=1000)
+    target_length: Optional[int] = Field(default=None, ge=200, le=10000)
+    facts: Optional[str] = None
+    cover: Optional[str] = Field(default=None, max_length=2000)
+
 
 class ReviewInput(Confirmation):
     reviewer: str = ''
@@ -244,9 +273,103 @@ def asset_create_manual(slug: str, payload: ManualContentInput):
     return editorial.create_manual_asset(slug, payload.title, payload.brief, payload.channel)
 
 
+@app.get('/api/projects/{slug}/library')
+def content_library(slug: str):
+    """内容库：所有初稿的清单（不含正文）。"""
+    return editorial.library(slug)
+
+
+@app.delete('/api/projects/{slug}/content/{identity}')
+def asset_delete(slug: str, identity: str):
+    return editorial.delete_asset(slug, identity)
+
+
+@app.get('/api/projects/{slug}/content/{identity}/context')
+def asset_context(slug: str, identity: str):
+    return editorial.content_context(slug, identity)
+
+
+@app.post('/api/projects/{slug}/content/{identity}/sources/file')
+async def material_upload(slug: str, identity: str, files: list[UploadFile] = File(...),
+                          label: str = Form(default='')):
+    """上传附件（可多选）。返回逐条结果，单个文件失败不影响其他文件。"""
+    editorial.require_asset(slug, identity)
+    results = []
+    for item in files:
+        name = item.filename or 'material'
+        try:
+            data = await item.read()
+            results.append(dict(materials.add_file(slug, identity, name, data, label), file_name=name))
+        except (ValueError, KeyError, OSError) as exc:
+            results.append({'file_name': name, 'status': 'failed', 'error': str(exc)})
+        finally:
+            await item.close()
+    return {'results': results}
+
+
+class SourceUrlInput(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+    label: str = Field(default='', max_length=200)
+
+
+class SourceNoteInput(BaseModel):
+    text: str = Field(min_length=1, max_length=400_000)
+    label: str = Field(default='', max_length=200)
+
+
+@app.get('/api/projects/{slug}/content/{identity}/sources')
+def material_list(slug: str, identity: str, excerpt: int = 0):
+    editorial.require_asset(slug, identity)
+    return {'items': materials.list_sources(slug, identity, excerpt_chars=max(0, min(excerpt, 4000)))}
+
+
+@app.post('/api/projects/{slug}/content/{identity}/sources/url', status_code=201)
+def material_add_url(slug: str, identity: str, payload: SourceUrlInput):
+    editorial.require_asset(slug, identity)
+    return materials.add_url(slug, identity, payload.url, payload.label)
+
+
+@app.post('/api/projects/{slug}/content/{identity}/sources/note', status_code=201)
+def material_add_note(slug: str, identity: str, payload: SourceNoteInput):
+    editorial.require_asset(slug, identity)
+    return materials.add_note(slug, identity, payload.text, payload.label)
+
+
+@app.post('/api/projects/{slug}/content/{identity}/sources/{source_id}/refresh')
+def material_refresh(slug: str, identity: str, source_id: str):
+    editorial.require_asset(slug, identity)
+    return materials.refresh(slug, identity, source_id)
+
+
+@app.delete('/api/projects/{slug}/content/{identity}/sources/{source_id}')
+def material_delete(slug: str, identity: str, source_id: str):
+    editorial.require_asset(slug, identity)
+    return materials.delete(slug, identity, source_id)
+
+
+@app.get('/api/projects/{slug}/content/{identity}/sources/{source_id}/download')
+def material_download(slug: str, identity: str, source_id: str):
+    editorial.require_asset(slug, identity)
+    path, name = materials.file_path_for(slug, identity, source_id)
+    return FileResponse(path, filename=name)
+
+
+@app.post('/api/projects/{slug}/content/{identity}/generate')
+def asset_generate(slug: str, identity: str, payload: GenerateInput):
+    return editorial.generate_asset(
+        slug, identity, payload.revision, payload.confirm_overwrite,
+        brief=payload.brief, channel=payload.channel, audience=payload.audience,
+        objective=payload.objective, tone=payload.tone, keywords=payload.keywords,
+        target_length=payload.target_length, facts=payload.facts, cover=payload.cover)
+
+
 @app.put('/api/projects/{slug}/content/{identity}')
 def asset_save(slug: str,identity: str,payload: AssetInput):
-    return editorial.save_asset(slug,identity,payload.title,payload.body,payload.facts,payload.revision)
+    return editorial.save_asset(
+        slug,identity,payload.title,payload.body,payload.facts,payload.revision,
+        summary=payload.summary,brief=payload.brief,channel=payload.channel,
+        audience=payload.audience,objective=payload.objective,tone=payload.tone,
+        keywords=payload.keywords,target_length=payload.target_length,cover=payload.cover)
 
 @app.post('/api/projects/{slug}/content/{identity}/review')
 def asset_review(slug: str,identity: str,payload: ReviewInput):

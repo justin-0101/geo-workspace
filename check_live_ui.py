@@ -4,12 +4,16 @@ Deliberately data-agnostic: it reads the project list from the API instead of
 hardcoding any subject name, so this file never carries business information.
 """
 import json
+import os
 import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
-API = 'http://127.0.0.1:8798'
-OUT = Path(__file__).resolve().parent / 'test-results'
+# 默认打真实运行中的实例；跑临时实例验收时用环境变量覆盖（端口与截图目录）。
+API = os.environ.get('GEO_LIVE_API') or 'http://127.0.0.1:8798'
+PAGE_URL = os.environ.get('GEO_LIVE_PAGE') or 'http://127.0.0.1:4173/'
+OUT = Path(os.environ.get('GEO_LIVE_OUT') or (Path(__file__).resolve().parent / 'test-results'))
+OUT.mkdir(parents=True, exist_ok=True)
 NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
@@ -28,7 +32,15 @@ def main():
             page = browser.new_page(viewport={'width': 1440, 'height': 1000})
             page.set_default_timeout(20000)
             page.on('pageerror', lambda e: errors.append(str(e)))
-            page.goto('http://127.0.0.1:4173/', wait_until='domcontentloaded')
+            # 前端把 API 写死在 8798；指向临时实例时把请求改写过去（并补 CORS 头）。
+            if API != 'http://127.0.0.1:8798':
+                def forward(route):
+                    url = route.request.url.replace('http://127.0.0.1:8798', API)
+                    response = route.fetch(url=url)
+                    route.fulfill(response=response,
+                                  headers={**response.headers, 'access-control-allow-origin': '*'})
+                page.route('http://127.0.0.1:8798/**', forward)
+            page.goto(PAGE_URL, wait_until='domcontentloaded')
 
             def expect_page_lead(title, subtitle):
                 expect(page.locator('.page-lead')).to_be_visible()
@@ -94,10 +106,54 @@ def main():
             expect(page.locator('#scope')).to_be_visible()
 
             page.get_by_role('link', name='内容生产', exact=True).click()
-            expect_page_lead('内容生产', '从改善任务生成、编辑并审核发布内容。')
-            expect(page.get_by_role('button', name='＋ 直接生成内容', exact=True)).to_be_visible()
+            expect_page_lead('内容生产', '确认写作任务书与素材，生成初稿。')
+            expect(page.get_by_role('button', name='＋ 新建内容任务书', exact=True)).to_be_visible()
             page.screenshot(path=str(OUT / 'live-content.png'), full_page=True)
             checks.append('actions and content use the unified page lead')
+
+            # 生成任务页：只应有「写作任务书 + 素材」，不再有稿件与手填事实依据。
+            first_row = page.locator('#module a.row').first
+            if first_row.count():
+                first_row.click()
+                expect(page.locator('#asset-form')).to_be_visible()
+                for heading in ('写作任务书', '素材'):
+                    expect(page.get_by_role('heading', name=heading, exact=True)).to_be_visible()
+                expect(page.locator('#asset-form [name="channel"]')).to_be_visible()
+                expect(page.locator('#asset-form [name="audience"]')).to_be_visible()
+                expect(page.locator('#asset-form [name="objective"]')).to_be_visible()
+                expect(page.locator('#asset-form [name="brief"]')).to_be_visible()
+                # 稿件与手填事实依据已按需求移除
+                expect(page.locator('#asset-form [name="body"]')).to_have_count(0)
+                expect(page.locator('#asset-form [name="facts"]')).to_have_count(0)
+                expect(page.locator('#asset-form #generate')).to_be_visible()
+                expect(page.get_by_role('button', name='保存任务书', exact=True)).to_be_visible()
+                # 素材：上传附件 / 添加网址 / 粘贴文本三入口
+                expect(page.locator('#asset-form #src-file')).to_have_count(1)
+                expect(page.locator('#asset-form #src-url')).to_be_visible()
+                expect(page.get_by_role('button', name='添加网址', exact=True)).to_be_visible()
+                expect(page.get_by_role('button', name='粘贴文本', exact=True)).to_be_visible()
+                expect(page.locator('#src-list')).to_be_visible()
+                page.screenshot(path=str(OUT / 'live-content-editor.png'), full_page=True)
+                checks.append('content editor exposes brief plus materials, no draft block')
+                page.get_by_role('link', name='返回生成任务').click()
+                expect(page.get_by_role('button', name='＋ 新建内容任务书', exact=True)).to_be_visible()
+
+            # 内容库：一级菜单 + 列表（序号/标题/操作），数量跟 API 对齐
+            library = api('/api/projects/' + projects[0]['slug'] + '/library')['items']
+            page.get_by_role('link', name='内容库', exact=True).click()
+            expect_page_lead('内容库', '查看、编辑与审核所有生成的初稿。')
+            if library:
+                expect(page.locator('tr[data-lib]')).to_have_count(len(library))
+                first = page.locator('tr[data-lib]').first
+                expect(first.locator('td').nth(0)).to_have_text(str(library[0]['index']))
+                expect(first.get_by_role('link', name='查看', exact=True)).to_be_visible()
+                expect(first.get_by_role('link', name='编辑', exact=True)).to_be_visible()
+                expect(first.get_by_role('button', name='删除', exact=True)).to_be_visible()
+                page.screenshot(path=str(OUT / 'live-library.png'), full_page=True)
+                checks.append('library lists every item with index and actions')
+            else:
+                expect(page.get_by_text('内容库是空的')).to_be_visible()
+                checks.append('empty library states itself')
 
             page.get_by_role('link', name='批量发布', exact=True).click()
             expect_page_lead('批量发布', '把已审核的内容一次投到多个平台。')

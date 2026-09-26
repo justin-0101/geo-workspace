@@ -64,7 +64,13 @@ def migrate():
           id TEXT PRIMARY KEY, project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
           action_id TEXT REFERENCES improvement_items(id) ON DELETE CASCADE,
           source TEXT NOT NULL DEFAULT 'diagnosis', brief TEXT NOT NULL DEFAULT '',
-          title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', facts TEXT NOT NULL DEFAULT '',
+          channel TEXT NOT NULL DEFAULT '', audience TEXT NOT NULL DEFAULT '',
+          objective TEXT NOT NULL DEFAULT '', tone TEXT NOT NULL DEFAULT '专业、克制、具体',
+          keywords TEXT NOT NULL DEFAULT '', target_length INTEGER NOT NULL DEFAULT 1200,
+          title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+          facts TEXT NOT NULL DEFAULT '', cover TEXT NOT NULL DEFAULT '',
+          source_bundle_json TEXT NOT NULL DEFAULT '{}', generation_meta_json TEXT NOT NULL DEFAULT '{}',
+          quality_report_json TEXT NOT NULL DEFAULT '{}',
           status TEXT NOT NULL DEFAULT 'draft', revision INTEGER NOT NULL DEFAULT 1,
           reviewed_revision INTEGER, reviewer TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           UNIQUE(action_id));
@@ -77,6 +83,16 @@ def migrate():
           mode TEXT NOT NULL DEFAULT 'manual', adapter_note TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
           UNIQUE(asset_id,platform,asset_revision));
+        CREATE TABLE IF NOT EXISTS asset_sources (
+          id TEXT PRIMARY KEY, project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
+          asset_id TEXT NOT NULL REFERENCES editorial_assets(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+          file_name TEXT NOT NULL DEFAULT '', file_path TEXT NOT NULL DEFAULT '',
+          mime TEXT NOT NULL DEFAULT '', size_bytes INTEGER NOT NULL DEFAULT 0,
+          extracted_text TEXT NOT NULL DEFAULT '',
+          extract_status TEXT NOT NULL DEFAULT 'pending', extract_note TEXT NOT NULL DEFAULT '',
+          fetched_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS asset_sources_by_asset ON asset_sources(asset_id, created_at);
         CREATE TABLE IF NOT EXISTS workspace_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE UNIQUE INDEX IF NOT EXISTS one_active_execution_per_project
           ON execution_runs(project_slug)
@@ -93,7 +109,13 @@ def migrate():
               id TEXT PRIMARY KEY, project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
               action_id TEXT REFERENCES improvement_items(id) ON DELETE CASCADE,
               source TEXT NOT NULL DEFAULT 'diagnosis', brief TEXT NOT NULL DEFAULT '',
-              title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', facts TEXT NOT NULL DEFAULT '',
+              channel TEXT NOT NULL DEFAULT '', audience TEXT NOT NULL DEFAULT '',
+              objective TEXT NOT NULL DEFAULT '', tone TEXT NOT NULL DEFAULT '专业、克制、具体',
+              keywords TEXT NOT NULL DEFAULT '', target_length INTEGER NOT NULL DEFAULT 1200,
+              title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '',
+              facts TEXT NOT NULL DEFAULT '', cover TEXT NOT NULL DEFAULT '',
+              source_bundle_json TEXT NOT NULL DEFAULT '{}', generation_meta_json TEXT NOT NULL DEFAULT '{}',
+              quality_report_json TEXT NOT NULL DEFAULT '{}',
               status TEXT NOT NULL DEFAULT 'draft', revision INTEGER NOT NULL DEFAULT 1,
               reviewed_revision INTEGER, reviewer TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
               UNIQUE(action_id));
@@ -108,6 +130,24 @@ def migrate():
             ''')
             c.execute('PRAGMA legacy_alter_table=OFF')
             c.execute('PRAGMA foreign_keys=ON')
+        # Evidence-driven content fields are additive so existing assets and reviews survive migration.
+        asset_cols = {row['name'] for row in c.execute('PRAGMA table_info(editorial_assets)')}
+        content_fields = (
+            ('channel', "TEXT NOT NULL DEFAULT ''"),
+            ('audience', "TEXT NOT NULL DEFAULT ''"),
+            ('objective', "TEXT NOT NULL DEFAULT ''"),
+            ('tone', "TEXT NOT NULL DEFAULT '专业、克制、具体'"),
+            ('keywords', "TEXT NOT NULL DEFAULT ''"),
+            ('target_length', 'INTEGER NOT NULL DEFAULT 1200'),
+            ('summary', "TEXT NOT NULL DEFAULT ''"),
+            ('cover', "TEXT NOT NULL DEFAULT ''"),
+            ('source_bundle_json', "TEXT NOT NULL DEFAULT '{}'"),
+            ('generation_meta_json', "TEXT NOT NULL DEFAULT '{}'"),
+            ('quality_report_json', "TEXT NOT NULL DEFAULT '{}'"),
+        )
+        for name, ddl in content_fields:
+            if name not in asset_cols:
+                c.execute(f'ALTER TABLE editorial_assets ADD COLUMN {name} {ddl}')
         # Publishing jobs record which adapter handled them and why they still need a human.
         job_cols = {row['name'] for row in c.execute('PRAGMA table_info(publishing_jobs)')}
         for name, ddl in (('mode', "TEXT NOT NULL DEFAULT 'manual'"),

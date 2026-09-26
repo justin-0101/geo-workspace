@@ -31,12 +31,13 @@ function md(text) {
  }
  return out.join('');
 }
-const labels = {workbench:'工作台',projects:'诊断项目',actions:'改善任务',content:'内容生产',publications:'批量发布',reports:'报告中心',platforms:'模型与平台',settings:'设置'};
+const labels = {workbench:'工作台',projects:'诊断项目',actions:'改善任务',content:'内容生产',library:'内容库',publications:'批量发布',reports:'报告中心',platforms:'模型与平台',settings:'设置'};
 const pageIntro = {
  '工作台':'集中查看待处理事项和最近活动。',
  '诊断项目':'创建并管理 GEO 诊断项目。',
  '改善任务':'把诊断结论转成可执行的改善任务。',
- '内容生产':'从改善任务生成、编辑并审核发布内容。',
+ '内容生产':'确认写作任务书与素材，生成初稿。',
+ '内容库':'查看、编辑与审核所有生成的初稿。',
  '批量发布':'把已审核的内容一次投到多个平台。',
  '报告中心':'查看诊断报告、数据质量和原始数据。',
  '模型与平台':'查看诊断模型与发布平台的接入方式。',
@@ -49,6 +50,8 @@ let pubPicked = [], pubPlats = [], pubTabGeo = null;
 const route = () => { const [rawView='', query=''] = location.hash.slice(1).split('?'); return {view:rawView||'workbench', params:new URLSearchParams(query)}; };
 const link = (view, project, tab) => '#'+view+(project?'?project='+encodeURIComponent(project)+(tab?'&tab='+tab:''):'');
 async function api(path, method='GET', body) { const abort=new AbortController(),deadline=setTimeout(()=>abort.abort(),20000);try{const r=await fetch(API+path,{method,signal:abort.signal,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}); const d=await r.json().catch(()=>({})); if(!r.ok) throw Error(typeof d.detail==='string'?d.detail:'提交信息有误，请检查填写内容'); return d;}catch(e){if(e.name==='AbortError')throw Error('请求超时，请刷新核对是否已保存，避免重复提交');if(e instanceof TypeError)throw Error('服务连接失败，请确认本地服务已启动后重新加载');throw e;}finally{clearTimeout(deadline);} }
+// 上传不能自己设 Content-Type，否则 multipart 的 boundary 会丢。
+async function apiUpload(path, formData) { const abort=new AbortController(),deadline=setTimeout(()=>abort.abort(),180000);try{const r=await fetch(API+path,{method:'POST',body:formData,signal:abort.signal}); const d=await r.json().catch(()=>({})); if(!r.ok) throw Error(typeof d.detail==='string'?d.detail:'上传失败，请检查文件后重试'); return d;}catch(e){if(e.name==='AbortError')throw Error('上传超时，请改用更小的文件或稍后重试');if(e instanceof TypeError)throw Error('服务连接失败，请确认本地服务已启动后重新加载');throw e;}finally{clearTimeout(deadline);} }
 function notice(text) { $('#notice').textContent=text; $('#notice').hidden=!text; }
 function head(title, action='', subtitle=pageIntro[title]||'') {
  return `<div class="page-lead"><div><h1>${esc(title)}</h1>${subtitle?`<p>${esc(subtitle)}</p>`:''}</div>${action?`<div class="page-actions">${action}</div>`:''}</div>`;
@@ -77,8 +80,8 @@ function crumbHTML(view,project,tab){
   return (href?`<a href="${href}">${esc(text)}</a>`:`<span>${esc(text)}</span>`)+'<span class="crumb-sep">/</span>';
  }).join('');
 }
-function modal(title, body, submit, button='确定') {
- const d=$('#modal'); $('#modal-title').textContent=title; $('#modal-body').innerHTML=body; $('#modal-error').textContent=''; $('#confirm-modal').textContent=button;
+function modal(title, body, submit, button='确定', cancel='取消') {
+ const d=$('#modal'); $('#modal-title').textContent=title; $('#modal-body').innerHTML=body; $('#modal-error').textContent=''; $('#confirm-modal').textContent=button; $('#cancel-modal').textContent=cancel;
  $('#modal-form').onsubmit=async e=>{e.preventDefault(); const b=$('#confirm-modal');b.disabled=true;try{const result=await submit(new FormData(e.target));d.close();await render();if(result&&result.message)notice(result.message);}catch(err){$('#modal-error').textContent=err.message;}finally{b.disabled=false;}}; d.showModal();
 }
 $('#close-modal').onclick=$('#cancel-modal').onclick=()=>$('#modal').close();
@@ -87,7 +90,7 @@ async function render() {
  clearTimeout(timer);const token=++epoch; const {view,params}=route();notice('');
  const context=params.get('project')||sessionStorage.getItem('geo-project');
  if(params.get('project'))sessionStorage.setItem('geo-project',params.get('project'));
- document.querySelectorAll('nav a').forEach(a=>{const target=a.hash.slice(1).split('?')[0];a.classList.toggle('active',target===view);a.href=link(target,['actions','content','publications','reports'].includes(target)?context:null);});
+ document.querySelectorAll('nav a').forEach(a=>{const target=a.hash.slice(1).split('?')[0];a.classList.toggle('active',target===view);a.href=link(target,['actions','content','library','publications','reports'].includes(target)?context:null);});
  $('#breadcrumb').innerHTML=crumbHTML(view,null,null);
  $('#view').innerHTML='<p class="muted">加载中…</p>';
  try {
@@ -183,7 +186,7 @@ async function render() {
  } else if(view==='settings') {
   const d=(await api('/api/settings')).settings;show(head('设置')+`<form id="settings-form" class="panel"><label>工作空间名称<input name="workspace_label" required value="${esc(d.workspace_label)}"></label><label>默认操作人<input name="default_operator" value="${esc(d.default_operator)}"></label><button class="primary">保存</button></form>`,token);
   if(token!==epoch)return;$('#settings-form').onsubmit=async e=>{e.preventDefault();try{await api('/api/settings','PUT',Object.fromEntries(new FormData(e.target)));notice('已保存');}catch(err){notice(err.message);}};
- } else if(['actions','content','publications','reports'].includes(view)) {
+ } else if(['actions','content','library','publications','reports'].includes(view)) {
   const projects=(await api('/api/projects')).projects;
   const chosen=projects.find(p=>p.slug===context);
   const scopeSel=`<select id="scope" aria-label="当前项目"><option value="">选择项目</option>${projects.map(p=>`<option value="${p.slug}" ${p.slug===chosen?.slug?'selected':''}>${esc(p.name)}</option>`).join('')}</select>`;
@@ -227,20 +230,170 @@ async function render() {
    const wantRun=params.get('run');
    if(wantRun&&rtab==='report'){const i=group.findIndex(r=>r.run_id===wantRun&&r.name==='diagnosis.md');if(i>=0)document.querySelector(`[data-report="${i}"]`)?.click();}
   } else {
-   const items=(await api(base+'/editorial/'+view)).items;if(token!==epoch)return;
+   // 各视图需要的清单不一样：改善任务、内容/内容库详情、发布与报告各自取自己的。
+   let items=[];
+   if(view==='actions') items=(await api(base+'/editorial/actions')).items;
+   else if(view==='content'||params.get('asset')) items=(await api(base+'/editorial/content')).items;
+   if(token!==epoch)return;
    if(view==='actions') {
     $('#module').innerHTML=`<section class="panel">${items.map(x=>`<div class="row"><div><strong>${esc(x.title)}</strong> ${badge(x.status)}<p class="muted">${esc(x.description)}</p><a href="${link('projects',chosen.slug,'runs')+'&run='+x.run_id}">查看诊断依据</a></div><button data-create-asset="${x.id}">编写内容</button></div>`).join('')||'<p class="empty">暂无改善任务。完成诊断后可从结果生成。</p>'}</section>`;
     document.querySelectorAll('[data-create-asset]').forEach(b=>b.onclick=async()=>{try{const x=await api(base+'/actions/'+b.dataset.createAsset+'/content','POST',{});location.hash=link('content',chosen.slug)+'&asset='+x.id;}catch(err){notice(err.message);}});
    } else if(view==='content') {
+    // 内容生产：只负责「写作任务书 + 素材 → 生成初稿」。稿件在「内容库」查看与编辑。
     const asset=items.find(x=>x.id===params.get('asset'));
     if(asset){
-     $('#module').innerHTML=`<form id="asset-form" class="panel"><div class="toolbar"><a class="button" href="${link('content',chosen.slug)}">返回内容列表</a>${badge(asset.status==='approved'?'已审核':'草稿')}<span class="muted">${asset.source==='manual'?'直接创建':'来自诊断'}</span></div><label>标题<input name="title" required value="${esc(asset.title)}"></label><label>正文<textarea name="body" style="min-height:280px">${esc(asset.body)}</textarea></label><label>事实依据与来源<textarea name="facts">${esc(asset.facts)}</textarea></label><div class="toolbar"><button class="primary">保存草稿</button><button type="button" id="review">审核当前版本</button><a class="button" href="${link('publications',chosen.slug)}">发布安排</a></div></form>`;
-     $('#asset-form').onsubmit=async e=>{e.preventDefault();try{await api(base+'/content/'+asset.id,'PUT',{...Object.fromEntries(new FormData(e.target)),revision:asset.revision});await render();notice('已保存，需重新审核');}catch(err){notice(err.message);}};
-     $('#review').onclick=()=>{const f=new FormData($('#asset-form'));if(['title','body','facts'].some(k=>f.get(k)!==asset[k])){notice('请先保存修改再审核');return;}modal('审核内容','<label>审核人<input name="reviewer" required></label><label class="check"><input type="checkbox" required>已核对正文与事实依据</label>',async data=>{await api(base+'/content/'+asset.id+'/review','POST',{reviewer:data.get('reviewer'),revision:asset.revision,confirm:true});},'审核通过');};
+     const ctx=await api(base+'/content/'+asset.id+'/context');if(token!==epoch)return;
+     const q=ctx.quality||{errors:[],warnings:[],passed:false};
+     const bundle=ctx.source_bundle||{};
+     const meta=ctx.generation_meta||{};
+     const generated=!/（待补充/.test(asset.body||'')&&!!(asset.body||'').trim();
+     const sourceSummary=asset.source==='diagnosis'
+      ?`诊断问题 ${esc(bundle.question_id||'—')} · ${(bundle.observations||[]).length} 条平台观测 · ${(bundle.evidence_files||[]).length} 个证据文件`
+      :'直接创建 · 使用项目资料与素材';
+     $('#module').innerHTML=`<form id="asset-form" class="panel">
+      <div class="toolbar"><a class="button" href="${link('content',chosen.slug)}">返回生成任务</a>${badge(generated?'草稿':'待生成')}<span class="muted">${asset.source==='manual'?'直接创建':'来自诊断'}</span></div>
+      <h2>写作任务书</h2><div class="form-grid">
+       <label>目标渠道<input name="channel" value="${esc(asset.channel||'')}" placeholder="公众号长文 / 官网 / 知乎 / 小红书"></label>
+       <label>目标读者<input name="audience" value="${esc(asset.audience||'')}" placeholder="谁会阅读并据此做什么决定"></label>
+       <label class="wide">写作目标<textarea name="objective" rows="3" placeholder="这篇内容要回答什么问题、推动什么行动">${esc(asset.objective||'')}</textarea></label>
+       <label>语气<input name="tone" value="${esc(asset.tone||'专业、克制、具体')}"></label>
+       <label>目标字数<input name="target_length" type="number" min="200" max="10000" value="${esc(asset.target_length||1200)}"></label>
+       <label class="wide">关键词<input name="keywords" value="${esc(asset.keywords||'')}" placeholder="多个关键词用逗号分隔"></label>
+       <label class="wide">写作要点<textarea name="brief" rows="3">${esc(asset.brief||'')}</textarea></label>
+      </div>
+      <details><summary><strong>证据包</strong> <span class="muted">${sourceSummary}</span></summary>
+       <p>${esc(bundle.notice||'')}</p>${bundle.question?`<p><strong>对应问题：</strong>${esc(bundle.question)}</p>`:''}
+       ${bundle.suggested_title?`<p><strong>报告建议标题：</strong>${esc(bundle.suggested_title)}</p>`:''}
+       ${(bundle.evidence_files||[]).length?`<p class="muted">证据索引：${bundle.evidence_files.map(esc).join('、')}</p>`:'<p class="muted">当前没有诊断证据文件；使用项目资料和上传的素材。</p>'}
+      </details>
+      <h2 style="margin-top:24px">素材</h2>
+      <section class="source-panel">
+       <div class="toolbar">
+        <label class="button src-upload">上传附件<input type="file" id="src-file" multiple hidden accept=".txt,.md,.markdown,.csv,.json,.html,.htm,.pdf,.docx,.xlsx,.xlsm,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff"></label>
+        <input id="src-url" placeholder="粘贴网址，例如 https://example.com/about" style="flex:1;min-width:220px">
+        <button type="button" id="src-add-url">添加网址</button>
+        <button type="button" id="src-paste">粘贴文本</button>
+        <span class="muted" id="src-hint"></span>
+       </div>
+       <ul class="source-list" id="src-list"></ul>
+       <p class="muted">生成时会把这里的内容读进来，提取可引用的企业介绍与事实，并自动写进稿件的「来源」。素材不等于已确认事实，审核前仍需核对口径与时效。图片与无文字层的扫描件会自动 OCR（本机识别，约 8 秒/页）。</p>
+      </section>
+      <div class="toolbar"><button class="primary" id="save-brief">保存任务书</button><button type="button" id="generate" class="primary">${generated?'重新生成初稿':'生成初稿'}</button><span class="muted">${esc(ctx.generator.message)}${meta.generated_at?' · 上次生成 '+esc(localTime(meta.generated_at)):''}</span></div>
+      ${generated
+        ?`<p class="muted">本稿已生成：约 ${q.plain_length||0} 字，自动质量检查${q.passed?'通过':'未通过'}。正文、来源与审核都在<a href="${link('library',chosen.slug)+'&asset='+asset.id}">内容库</a>处理。</p>`
+        :'<p class="muted">点「生成初稿」后，稿件会进入「内容库」，在那里查看、编辑和审核。</p>'}
+     </form>`;
+     const form=$('#asset-form');
+     const payload=()=>{const o=Object.fromEntries(new FormData(form));o.target_length=Number(o.target_length||1200);return o;};
+     form.onsubmit=async e=>{e.preventDefault();try{await api(base+'/content/'+asset.id,'PUT',{...payload(),title:asset.title,body:asset.body,revision:asset.revision});await render();notice('已保存任务书');}catch(err){notice(err.message);}};
+     const runGenerate=async confirmOverwrite=>{
+      try{
+       const p=payload();
+       const out=await api(base+'/content/'+asset.id+'/generate','POST',{revision:asset.revision,confirm_overwrite:confirmOverwrite,brief:p.brief,channel:p.channel,audience:p.audience,objective:p.objective,tone:p.tone,keywords:p.keywords,target_length:p.target_length});
+       await render();
+       const quality=out.quality||{};
+       modal('初稿已生成',
+        `<p>《${esc(out.title||asset.title)}》已完成，正文约 ${quality.plain_length||0} 字。</p>
+         <p class="muted">${quality.passed?'自动质量检查通过：可以到内容库核对后审核。':'自动质量检查未通过，到内容库看需要补什么。'}</p>
+         ${(out.warnings||[]).map(w=>`<p class="muted">△ ${esc(w)}</p>`).join('')}`,
+        async()=>{location.hash=link('library',chosen.slug)+'&asset='+asset.id;},'去内容库查看','留在本页');
+      }catch(err){notice(err.message);}
+     };
+     $('#generate').onclick=()=>{if(generated)modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',()=>runGenerate(true),'确认覆盖并生成');else runGenerate(false);};
+     // ---- 素材（含后台 OCR 轮询）----
+     const SRC_KIND={file:'附件',url:'网址',note:'文本'};
+     const SRC_STATUS={ok:['已提取','good'],empty:['没提取到文字','warn'],failed:['提取失败','bad'],unsupported:['需人工说明','warn'],pending:['待提取','warn'],ocr_pending:['OCR 识别中','warn']};
+     const paintSources=()=>{
+      const box=$('#src-list');if(!box)return;
+      const rows=ctx.sources||[];
+      box.innerHTML=rows.length?rows.map(s=>{
+       const st=SRC_STATUS[s.status]||['未知','warn'];
+       const title=s.label||s.file_name||s.url||'素材';
+       const meta=s.kind==='url'?s.url:s.kind==='file'?`${s.file_name} · ${Math.max(1,Math.round((s.size_bytes||0)/1024))} KB`:'粘贴文本';
+       return `<li data-source="${s.id}" data-status="${esc(s.status)}"><div><span class="src-tag">${SRC_KIND[s.kind]||esc(s.kind)}</span> <strong>${esc(title)}</strong> <span class="badge ${st[1]}">${st[0]}</span><small>${esc(meta)}${s.chars?` · ${s.chars} 字`:''}${s.note?' · '+esc(s.note):''}</small></div><div class="src-ops">${s.kind!=='note'?`<button type="button" class="btn-quiet" data-src-refresh="${s.id}">重新提取</button>`:''}${s.has_file?`<a class="btn-quiet" href="${API}/api/projects/${chosen.slug}/content/${asset.id}/sources/${s.id}/download">下载</a>`:''}<button type="button" class="btn-quiet" data-src-del="${s.id}">删除</button></div></li>`;
+      }).join(''):'<li class="src-empty">还没有素材。上传产品资料、添加官网网址，或粘贴一段介绍。</li>';
+      box.querySelectorAll('[data-src-del]').forEach(b=>b.onclick=async()=>{try{await api(base+'/content/'+asset.id+'/sources/'+b.dataset.srcDel,'DELETE');await render();notice('已删除素材');}catch(err){notice(err.message);}});
+      box.querySelectorAll('[data-src-refresh]').forEach(b=>b.onclick=async()=>{const hint=$('#src-hint');if(hint)hint.textContent='正在重新读取…';try{const out=await api(base+'/content/'+asset.id+'/sources/'+b.dataset.srcRefresh+'/refresh','POST',{});await render();notice(out.status==='ok'?`已重新提取 ${out.chars} 字`:`重新读取完成：${out.note||out.status}`);}catch(err){if(hint)hint.textContent='';notice(err.message);}});
+      const waiting=box.querySelectorAll('[data-status="ocr_pending"]').length;
+      if(waiting&&token===epoch){
+       const hint=$('#src-hint');if(hint)hint.textContent=`${waiting} 个素材正在 OCR 识别，完成后自动刷新…`;
+       window.__geoOcrPolls=window.__geoOcrPolls||0;
+       if(window.__geoOcrPolls<24){window.__geoOcrPolls+=1;const stamp=epoch;setTimeout(()=>{if(epoch===stamp)render();},4000);}
+      }else if(token===epoch){window.__geoOcrPolls=0;}
+     };
+     paintSources();
+     $('#src-file').onchange=async e=>{const files=[...e.target.files];if(!files.length)return;const fd=new FormData();files.forEach(f=>fd.append('files',f));const hint=$('#src-hint');if(hint)hint.textContent=`正在读取 ${files.length} 个文件…`;try{const out=await apiUpload(base+'/content/'+asset.id+'/sources/file',fd);const bad=out.results.filter(r=>r.error);const queued=out.results.filter(r=>r.status==='ocr_pending').length;await render();notice(bad.length?`${out.results.length-bad.length} 个素材已导入，${bad.length} 个失败：${bad[0].error}`:(queued?`已导入 ${out.results.length} 个素材，其中 ${queued} 个正在 OCR 识别`:`已导入 ${out.results.length} 个素材`));}catch(err){if(hint)hint.textContent='';notice(err.message);}};
+     const addUrl=async()=>{const input=$('#src-url');const url=(input.value||'').trim();if(!url){notice('请先填写网址');return;}const hint=$('#src-hint');if(hint)hint.textContent='正在抓取页面…';try{const out=await api(base+'/content/'+asset.id+'/sources/url','POST',{url});await render();notice(out.status==='ok'?`已抓取并提取 ${out.chars} 字`:(out.status==='ocr_pending'?'已保存，正在 OCR 识别':`抓取完成但没提取到文字：${out.note||''}`));}catch(err){if(hint)hint.textContent='';notice(err.message);}};
+     $('#src-add-url').onclick=addUrl;
+     $('#src-url').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();addUrl();}};
+     $('#src-paste').onclick=()=>modal('粘贴文本素材','<label>名称<input name="label" required maxlength="200" placeholder="例如：销售口述的产品要点"></label><label>内容<textarea name="text" rows="8" required placeholder="把已确认的介绍、参数或案例粘进来"></textarea></label>',async d=>{await api(base+'/content/'+asset.id+'/sources/note','POST',{label:d.get('label'),text:d.get('text')});},'保存素材');
     }else{
-     $('#module').innerHTML=`<div class="toolbar"><button id="direct" class="primary">＋ 直接生成内容</button><span class="muted">不需要诊断结果，可直接创建内容草稿</span></div><section class="panel">${items.map(x=>`<a class="row" href="${link('content',chosen.slug)+'&asset='+x.id}"><span>${esc(x.title)}<small>${x.source==='manual'?'直接创建':'来自诊断'}</small></span>${badge(x.status==='approved'?'已审核':'草稿')}</a>`).join('')||'<p class="empty">暂无内容。可以直接创建，也可以先完成诊断再从改善任务生成。</p>'}</section>`;
-     $('#direct').onclick=()=>modal('直接生成内容','<label>内容标题<input name="title" required maxlength="200" autofocus placeholder="例如：设备资产管理系统选型指南"></label><label>写作要点（每行一个，会生成小节标题）<textarea name="brief" placeholder="这个行业常见的问题\n选型要看的指标\n可核查的案例"></textarea></label><label>用途<input name="channel" placeholder="例如：公众号长文 / 官网页 / 知乎回答"></label><p class="muted">这里只生成结构大纲，正文与事实依据需要你填写；未补齐“待补充”段落不能通过审核。</p>',async data=>{const r=await api(base+'/content','POST',Object.fromEntries(data));location.hash=link('content',chosen.slug)+'&asset='+r.id;},'创建草稿');
+     const todo=items.filter(x=>/（待补充/.test(x.body||''));
+     $('#module').innerHTML=`<div class="toolbar"><button id="direct" class="primary">＋ 新建内容任务书</button><a class="button" href="${link('library',chosen.slug)}">去内容库看已生成的初稿</a><span class="muted">确认任务书与素材后生成初稿。</span></div>
+      <section class="panel">${todo.map(x=>`<a class="row" href="${link('content',chosen.slug)+'&asset='+x.id}"><span>${esc(x.title)}<small>${x.channel?'渠道：'+esc(x.channel)+' · ':''}还没有生成初稿</small></span>${badge('待生成')}</a>`).join('')||'<p class="empty">没有待生成的任务书。可以从「改善任务」点「编写内容」，或直接新建。</p>'}</section>`;
+     $('#direct').onclick=()=>modal('新建内容任务书','<label>暂定标题<input name="title" required maxlength="200" autofocus placeholder="例如：设备资产管理系统选型指南"></label><label>写作要点<textarea name="brief" placeholder="要回答的问题\n需要覆盖的判断标准\n已有的可核验材料"></textarea></label><label>目标渠道<input name="channel" placeholder="例如：公众号长文 / 官网 / 知乎回答"></label><p class="muted">创建后上传素材并确认写作任务书，再生成初稿。</p>',async data=>{const r=await api(base+'/content','POST',Object.fromEntries(data));location.hash=link('content',chosen.slug)+'&asset='+r.id;},'创建任务书');
     }
+   } else if(view==='library') {
+    // 内容库：所有内容的清单 + 查看 / 编辑 / 删除。
+    const lib=(await api(base+'/library')).items;if(token!==epoch)return;
+    const libAsset=params.get('asset')?items.find(x=>x.id===params.get('asset')):null;
+    const mode=params.get('mode')==='edit'?'edit':'view';
+    const statusText=(status,generatedAt)=>status==='approved'?'已审核':(generatedAt?'草稿':'待生成');
+    const statusTone=(status,generatedAt)=>status==='approved'?'good':(generatedAt?'':'warn');
+    const removeAsset=(x)=>{
+     const extra=x.job_count?`<p class="muted">这条内容已有 ${x.job_count} 条发布记录，删除会一并移除。</p>`:'';
+     modal('删除内容',`<p>确定删除《${esc(x.title)}》？它的素材与发布记录会一起删除，不可恢复。</p>${extra}<label class="check"><input type="checkbox" required>我确认删除这条内容</label>`,
+      async()=>{const out=await api(base+'/content/'+x.id,'DELETE');if(libAsset)location.hash=link('library',chosen.slug);return out;},'删除');
+    };
+    if(!libAsset){
+     $('#module').innerHTML=`<div class="toolbar"><button id="newbrief" class="primary">＋ 新建内容任务书</button><span class="muted">共 ${lib.length} 条内容；序号按列表顺序，最新在前。</span></div>
+      <section class="panel"><div class="table-scroll"><table class="lib-table"><thead><tr><th>序号</th><th>标题</th><th>来源</th><th>渠道</th><th>状态</th><th>字数</th><th>生成时间</th><th>操作</th></tr></thead><tbody>
+      ${lib.map(x=>`<tr data-lib="${x.id}"><td>${x.index}</td><td><strong>${esc(x.title)}</strong>${x.material_count?`<small>素材 ${x.material_count} 个</small>`:''}</td><td>${x.source==='manual'?'直接创建':'来自诊断'}</td><td>${esc(x.channel||'—')}</td><td><span class="badge ${statusTone(x.status,x.generated_at)}">${statusText(x.status,x.generated_at)}</span></td><td>${x.chars||0}</td><td>${x.generated_at?esc(localTime(x.generated_at).slice(0,16).replace('T',' ')):'未生成'}</td><td class="lib-ops"><a href="${link('library',chosen.slug)+'&asset='+x.id}">查看</a><a href="${link('library',chosen.slug)+'&asset='+x.id+'&mode=edit'}">编辑</a><button type="button" class="btn-quiet" data-lib-del="${x.id}">删除</button></td></tr>`).join('')||'<tr><td colspan="8" class="src-empty">内容库是空的。到「内容生产」确认任务书与素材后生成初稿。</td></tr>'}
+      </tbody></table></div></section>`;
+     $('#newbrief').onclick=()=>modal('新建内容任务书','<label>暂定标题<input name="title" required maxlength="200" autofocus></label><label>写作要点<textarea name="brief" placeholder="要回答的问题"></textarea></label><label>目标渠道<input name="channel" placeholder="例如：公众号长文"></label>',async data=>{const r=await api(base+'/content','POST',Object.fromEntries(data));location.hash=link('content',chosen.slug)+'&asset='+r.id;},'创建任务书');
+     $('#module').querySelectorAll('[data-lib-del]').forEach(b=>b.onclick=()=>removeAsset(lib.find(x=>x.id===b.dataset.libDel)||{id:b.dataset.libDel,title:''}));
+    }else{
+     const ctx=await api(base+'/content/'+libAsset.id+'/context');if(token!==epoch)return;
+     const q=ctx.quality||{errors:[],warnings:[],passed:false};
+     const libRow=lib.find(x=>x.id===libAsset.id)||{};
+     const meta=ctx.generation_meta||{};
+     const qualityHtml=q.passed
+      ?'<p style="color:var(--green)">✓ 当前版本通过自动质量检查</p>'
+      :`<div>${(q.errors||[]).map(x=>`<p style="color:var(--red)">● ${esc(x)}</p>`).join('')}</div>`;
+     const warnings=(q.warnings||[]).map(x=>`<p class="muted">△ ${esc(x)}</p>`).join('');
+     const head=`<div class="toolbar"><a class="button" href="${link('library',chosen.slug)}">返回内容库</a>${badge(statusText(libAsset.status,meta.generated_at))}<span class="muted">第 ${libRow.index||'—'} 条 · ${libAsset.source==='manual'?'直接创建':'来自诊断'} · ${esc(libAsset.channel||'未设渠道')}</span></div>`;
+     if(mode==='view'){
+      $('#module').innerHTML=`${head}
+       <section class="panel"><h2>${esc(libAsset.title)}</h2>
+        <p class="muted">约 ${q.plain_length||0} 字${meta.generated_at?` · 生成于 ${esc(localTime(meta.generated_at))}`:''}${meta.engine?` · ${esc(meta.engine)}`:''}${meta.model?` / ${esc(meta.model)}`:''} · 素材 ${(ctx.sources||[]).length} 个 · 版本 ${libAsset.revision}</p>
+        ${libAsset.summary?`<p>${esc(libAsset.summary)}</p>`:''}
+        <div class="draft-body">${esc(libAsset.body||'（还没有正文）')}</div>
+        <h3 style="margin-top:24px">来源</h3><div class="draft-sources">${esc(libAsset.facts||'（没有来源记录）')}</div>
+        <h3 style="margin-top:24px">质量检查</h3>${qualityHtml}${warnings}
+        <p class="muted">有效正文约 ${q.plain_length||0} 字；最低要求 ${q.minimum_length||0} 字。审核与发布前都会重新检查。</p>
+        <div class="toolbar" style="margin-top:20px"><a class="button primary" href="${link('library',chosen.slug)+'&asset='+libAsset.id+'&mode=edit'}">编辑</a><a class="button" href="${link('publications',chosen.slug)}">发布安排</a><button type="button" class="btn-quiet" id="lib-del">删除</button></div>
+       </section>`;
+      $('#lib-del').onclick=()=>removeAsset(libRow.id?libRow:{id:libAsset.id,title:libAsset.title});
+     }else{
+      $('#module').innerHTML=`${head}
+       <form id="lib-form" class="panel">
+        <h2>编辑初稿</h2>
+        <label>标题<input name="title" required maxlength="200" value="${esc(libAsset.title)}"></label>
+        <label>摘要<textarea name="summary" rows="3">${esc(libAsset.summary||'')}</textarea></label>
+        <label>正文<textarea name="body" style="min-height:420px">${esc(libAsset.body||'')}</textarea></label>
+        <h3 style="margin-top:24px">来源（由素材与项目资料自动带出，只读）</h3><div class="draft-sources">${esc(libAsset.facts||'（没有来源记录）')}</div>
+        <h3 style="margin-top:24px">质量检查</h3>${qualityHtml}${warnings}
+        <p class="muted">有效正文约 ${q.plain_length||0} 字；最低要求 ${q.minimum_length||0} 字。保存后原审核会失效。</p>
+        <div class="toolbar" style="margin-top:20px"><button class="primary">保存草稿</button><button type="button" id="lib-review" ${q.passed?'':'disabled'}>审核当前版本</button><a class="button" href="${link('publications',chosen.slug)}">发布安排</a><button type="button" id="lib-regen">重新生成初稿</button><a class="button" href="${link('content',chosen.slug)+'&asset='+libAsset.id}">回任务书与素材</a></div>
+       </form>`;
+      const form=$('#lib-form');
+      const values=()=>{const o=Object.fromEntries(new FormData(form));return {title:o.title,summary:o.summary,body:o.body,revision:libAsset.revision};};
+      form.onsubmit=async e=>{e.preventDefault();try{const out=await api(base+'/content/'+libAsset.id,'PUT',values());await render();notice(`已保存（版本 ${out.revision}），原审核已失效`);}catch(err){notice(err.message);}};
+      $('#lib-review').onclick=()=>{const v=values();const dirty=['title','summary','body'].some(k=>String(v[k]||'')!==String(libAsset[k]||''));if(dirty){notice('请先保存修改并重新通过质量检查');return;}modal('审核内容','<label>审核人<input name="reviewer" required></label><label class="check"><input type="checkbox" required>已逐条核对正文、事实依据及公开范围</label>',async data=>{await api(base+'/content/'+libAsset.id+'/review','POST',{reviewer:data.get('reviewer'),revision:libAsset.revision,confirm:true});},'审核通过');};
+      $('#lib-regen').onclick=()=>modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',async()=>{const out=await api(base+'/content/'+libAsset.id+'/generate','POST',{revision:libAsset.revision,confirm_overwrite:true});return {message:`已重新生成初稿（约 ${(out.quality||{}).plain_length||0} 字）`};},'确认覆盖并生成');
+     }
+    }
+
    } else {
     // ===== 批量发布 =====
     // 版式来自原型 v3：准入条 → 双页签 → 内容/平台双栏 → 贴底提交条 → 记录页签。

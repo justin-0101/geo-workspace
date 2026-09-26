@@ -716,3 +716,38 @@ label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:p
   .submit-bar{position:static;box-shadow:var(--elev-1)}
   .gate-facts{gap:var(--sp-5)}
 }
+
+/* ===== 素材面板（内容生产 · 事实与来源）=====
+   素材是生成的输入，不是已确认事实；状态用 badge 语义，不用颜色单独承担信息。 */
+.source-panel{border:1px solid var(--line);border-radius:8px;padding:var(--sp-4);background:var(--panel);margin-bottom:var(--sp-5)}
+.source-panel .toolbar{margin-bottom:var(--sp-3)}
+.src-upload{cursor:pointer}
+.source-list{list-style:none;margin:0;padding:0}
+.source-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-4);
+  padding:var(--sp-3) 0;border-bottom:1px solid var(--line-soft)}
+.source-list li:last-child{border-bottom:0}
+.source-list li>*{min-width:0}
+.source-list strong{font-size:var(--fs-note);overflow-wrap:anywhere}
+.source-list small{display:block;color:var(--muted);font-size:var(--fs-meta);margin-top:5px;
+  overflow-wrap:anywhere;line-height:1.6}
+.src-tag{display:inline-block;font-size:11px;padding:2px 6px;border-radius:4px;
+  background:var(--line-soft);color:var(--muted-ink);margin-right:4px}
+.src-ops{display:flex;gap:6px;flex-wrap:wrap;flex:0 0 auto;align-items:center}
+.src-ops a.btn-quiet{display:inline-flex;align-items:center;text-decoration:none}
+.src-empty{padding:var(--sp-5) 0;color:var(--muted);font-size:var(--fs-note)}
+@media(max-width:760px){.source-list li{flex-direction:column;gap:var(--sp-2)}}
+
+/* ===== 内容库 ===== */
+.lib-table th:first-child,.lib-table td:first-child{width:52px;color:var(--muted);font-variant-numeric:tabular-nums}
+.lib-table td{vertical-align:top}
+.lib-table strong{font-size:var(--fs-note);overflow-wrap:anywhere}
+.lib-table small{display:block;color:var(--muted);font-size:var(--fs-meta);margin-top:4px}
+.lib-ops{white-space:nowrap}
+.lib-ops a,.lib-ops button{margin-right:8px}
+.lib-ops a{color:var(--blue);text-decoration:none;font-weight:700;font-size:var(--fs-meta)}
+.lib-ops a:hover{text-decoration:underline}
+/* 稿件正文与来源：保留换行，不做 markdown 渲染（本地无渲染器，且原样展示更可核验） */
+.draft-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8;margin-top:var(--sp-4);
+  padding:var(--sp-4);border:1px solid var(--line);border-radius:8px;background:var(--bg);max-height:560px;overflow:auto}
+.draft-sources{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--fs-meta);color:var(--muted-ink);
+  padding:var(--sp-3);border-left:3px solid var(--line-strong);background:var(--bg)}

@@ -7,6 +7,12 @@ from diagnosis_runs import verify_frozen_run
 import workspace_store as store
 
 
+FACTS = '来源：测试夹具 https://example.com/fixture（不代表真实企业事实）'
+_SENTENCE = '质量门禁测试正文：本节用于验证审核与发布前的自动检查，不包含任何真实企业事实。'
+LONG_BODY = ('# 测试内容\n\n## 判断标准\n\n' + _SENTENCE * 8 +
+             '\n\n## 核验清单\n\n' + _SENTENCE * 6)
+
+
 class EditorialTests(APITests):
     def seed(self):
         slug=self.create(); base='/api/projects/'+slug
@@ -64,28 +70,168 @@ class EditorialTests(APITests):
         self.assertFalse(e['generated'])
         self.assertIsNone(e['latest'])
 
-    def test_content_can_be_created_without_diagnosis(self):
+    def _asset(self, base, aid):
+        return next(x for x in self.client.get(base+'/editorial/content').json()['items'] if x['id']==aid)
+
+    def test_content_can_be_created_and_generated_without_diagnosis(self):
         import publish_adapters as adapters
         slug=self.create('无诊断项目'); base='/api/projects/'+slug
         r=self.client.post(base+'/content',json={'title':'设备资产管理系统选型指南','brief':'常见问题\n选型指标','channel':'公众号长文'})
         self.assertEqual(r.status_code,201); aid=r.json()['id']
-        items=self.client.get(base+'/editorial/content').json()['items']
-        self.assertEqual(len(items),1)
-        self.assertEqual(items[0]['source'],'manual')
-        self.assertIsNone(items[0]['action_id'])
-        self.assertIn('## 常见问题',items[0]['body'])
-        self.assertIn('（待补充',items[0]['body'])
+        asset=self._asset(base,aid)
+        self.assertEqual(asset['source'],'manual'); self.assertIsNone(asset['action_id'])
+        self.assertIn('## 常见问题',asset['body']); self.assertIn('（待补充',asset['body'])
+        # 证据包与生成能力可读，未填事实时质量检查不通过
+        ctx=self.client.get(base+'/content/'+aid+'/context').json()
+        self.assertIn('source_bundle',ctx); self.assertIn('generator',ctx)
+        self.assertEqual(ctx['source_bundle']['notice'],'诊断平台回答只用于理解内容缺口，不作为企业事实。企业事实需由人工核验来源。')
+        self.assertEqual(ctx['source_bundle']['question_id'],'')
+        self.assertEqual(ctx['source_bundle']['observations'],[])
+        self.assertFalse(ctx['quality']['passed'])
         # 占位符未补齐不能过审
         r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':1,'confirm':True})
         self.assertEqual(r.status_code,409); self.assertIn('待补充',r.json()['detail'])
-        # 补齐正文与事实后可过审、可发布
-        self.assertEqual(self.client.put(base+'/content/'+aid,json={'title':'设备资产管理系统选型指南','body':'正文（已核对）','facts':'官网 https://example.com','revision':1}).status_code,200)
+        # 生成初稿：未配置内容模型时使用本地证据安全稿
+        out=self.client.post(base+'/content/'+aid+'/generate',json={
+            'revision':1,'facts':FACTS,'channel':'公众号长文','audience':'制造企业负责人','objective':'帮助读者建立可核验的选型框架'})
+        self.assertEqual(out.status_code,200)
+        self.assertEqual(out.json()['engine'],'local-safe'); self.assertEqual(out.json()['revision'],2)
+        asset=self._asset(base,aid)
+        self.assertNotIn('（待补充',asset['body'])
+        self.assertNotEqual(asset['generation_meta_json'],'{}')
+        self.assertEqual(asset['facts'],FACTS)
+        self.assertTrue(self.client.get(base+'/content/'+aid+'/context').json()['quality']['passed'])
         self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True}).status_code,200)
         with patch.object(adapters.PublishAdapter,'submit_browser',
                           lambda self,a,evidence_dir=None: adapters.PublishResult('submitted','已提交（测试）')):
             out=self.client.post(base+'/publish',json={'asset_ids':[aid],'platforms':['zhihu'],'confirm':True})
         self.assertEqual(out.status_code,200)
         self.assertEqual(out.json()['results'][0]['status'],'submitted')
+
+    def test_generate_requires_overwrite_confirmation(self):
+        slug,base,aid=self.seed()
+        first=self.client.post(base+'/content/'+aid+'/generate',json={'revision':1,'facts':FACTS,'channel':'公众号长文'})
+        self.assertEqual(first.status_code,200)
+        # 第二次生成必须显式确认覆盖，避免静默丢掉人工修改
+        blocked=self.client.post(base+'/content/'+aid+'/generate',json={'revision':2,'facts':FACTS,'channel':'公众号长文'})
+        self.assertEqual(blocked.status_code,409); self.assertIn('覆盖',blocked.json()['detail'])
+        allowed=self.client.post(base+'/content/'+aid+'/generate',json={'revision':2,'facts':FACTS,'channel':'公众号长文','confirm_overwrite':True})
+        self.assertEqual(allowed.status_code,200); self.assertEqual(allowed.json()['revision'],3)
+
+    def test_generate_rejects_stale_revision(self):
+        slug,base,aid=self.seed()
+        r=self.client.post(base+'/content/'+aid+'/generate',json={'revision':99,'facts':FACTS})
+        self.assertEqual(r.status_code,409); self.assertIn('刷新',r.json()['detail'])
+
+    def test_derive_groups_by_question(self):
+        slug,base,aid=self.seed()
+        rid=self.client.get(base).json()['runs'][0]['id']
+        path=verify_frozen_run(slug,rid)
+        with open(path/'observations.jsonl','a',encoding='utf8') as fh:
+            fh.write(json.dumps(dict(task_id='Q01_metaso_01',question_id='Q01',status='success',
+                                     response_text='TEST FIXTURE 2',input_prompt='测试问题',
+                                     evidence_files=['evidence/test.txt'],classification={'brand_mention':'no'}))+chr(10))
+        with store.connection() as c:
+            c.execute('DELETE FROM editorial_assets WHERE project_slug=?',(slug,))
+            c.execute('DELETE FROM improvement_items WHERE project_slug=?',(slug,))
+        self.assertEqual(self.client.post(base+'/runs/'+rid+'/improvements/derive').status_code,200)
+        items=self.client.get(base+'/editorial/actions').json()['items']
+        self.assertEqual(len(items),1)
+        self.assertEqual(items[0]['task_id'],'Q01')
+        self.assertIn('2 个有效观测',items[0]['description'])
+        self.assertIn('涉及平台',items[0]['description'])
+
+    def test_derive_prefers_report_suggested_title(self):
+        slug,base,aid=self.seed()
+        rid=self.client.get(base).json()['runs'][0]['id']
+        path=verify_frozen_run(slug,rid)
+        (path/'report').mkdir(exist_ok=True)
+        (path/'report'/'optimization-plan.md').write_text(
+            '| 对应问题 | 建议内容标题 | 目标 |\n| --- | --- | --- |\n'
+            '| Q01 | 怎么选：判断标准、适用场景与避坑清单 | 争取推荐 |\n',encoding='utf8')
+        with store.connection() as c:
+            c.execute('DELETE FROM editorial_assets WHERE project_slug=?',(slug,))
+            c.execute('DELETE FROM improvement_items WHERE project_slug=?',(slug,))
+        self.client.post(base+'/runs/'+rid+'/improvements/derive')
+        action=self.client.get(base+'/editorial/actions').json()['items'][0]
+        self.assertEqual(action['title'],'怎么选：判断标准、适用场景与避坑清单')
+        new=self.client.post(base+'/actions/'+action['id']+'/content').json()['id']
+        asset=self._asset(base,new)
+        self.assertEqual(asset['title'],'怎么选：判断标准、适用场景与避坑清单')
+        bundle=json.loads(asset['source_bundle_json'])
+        self.assertEqual(bundle['question_id'],'Q01')
+        self.assertEqual(bundle['suggested_title'],'怎么选：判断标准、适用场景与避坑清单')
+        self.assertEqual(len(bundle['observations']),1)
+        self.assertEqual(bundle['observations'][0]['fact_status'],'unverified-model-response')
+
+    def test_diagnosis_asset_bundle_carries_question_and_evidence(self):
+        slug,base,aid=self.seed()
+        ctx=self.client.get(base+'/content/'+aid+'/context').json()
+        bundle=ctx['source_bundle']
+        self.assertEqual(bundle['question_id'],'Q01')
+        self.assertEqual(bundle['question'],'测试问题')
+        self.assertEqual(bundle['evidence_files'],['evidence/test.txt'])
+        self.assertIn('不作为企业事实',bundle['notice'])
+        # 诊断回答只能作为缺口线索，不能自动变成已核验事实
+        self.assertEqual(bundle['verified_facts'],'')
+
+    def test_quality_gate_blocks_instruction_title_short_body_and_fake_source(self):
+        slug,base,aid=self.seed()
+        self.client.put(base+'/content/'+aid,json={'title':'待填写：补充问题相关的事实与内容：测试问题','body':LONG_BODY,'facts':FACTS,'revision':1})
+        r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True})
+        self.assertEqual(r.status_code,409); self.assertIn('标题仍是占位符',r.json()['detail'])
+        self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':'刚刚发生的','facts':FACTS,'revision':2})
+        r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':3,'confirm':True})
+        self.assertEqual(r.status_code,409); self.assertIn('低于当前渠道最低要求',r.json()['detail'])
+        self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':LONG_BODY,'facts':'刚刚发生的','revision':3})
+        r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':4,'confirm':True})
+        self.assertEqual(r.status_code,409); self.assertIn('标明出处',r.json()['detail'])
+        # 四项都补齐后才能过审
+        self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':LONG_BODY,'facts':FACTS,'revision':4})
+        self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':5,'confirm':True}).status_code,200)
+
+    def test_short_body_passes_after_channel_is_set(self):
+        slug,base,aid=self.seed()
+        brief_body='# 小红书笔记\n\n## 判断标准\n\n'+_SENTENCE*2
+        self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':brief_body,'facts':FACTS,'channel':'小红书','revision':1})
+        r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True})
+        self.assertEqual(r.status_code,409)
+        longer='# 小红书笔记\n\n## 判断标准\n\n'+_SENTENCE*6
+        self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':longer,'facts':FACTS,'channel':'小红书','revision':2})
+        self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':3,'confirm':True}).status_code,200)
+
+    def test_publish_rechecks_quality_for_legacy_approved_assets(self):
+        """旧数据曾用宽松门禁过审，发布前必须重新检查（实时库曾出现 4 字正文被视为可发布）。"""
+        slug,base,aid=self.seed()
+        with store.connection() as c:
+            c.execute("UPDATE editorial_assets SET title=?,body=?,facts=?,status='approved',"
+                      "reviewed_revision=revision,quality_report_json='{}' WHERE id=?",
+                      ('待填写：补充问题相关的事实与内容：测试问题','刚刚发生的','刚刚发生的',aid))
+        r=self.client.post(base+'/publish',json={'asset_ids':[aid],'platforms':['zhihu'],'confirm':True})
+        self.assertEqual(r.status_code,409); self.assertIn('质量检查',r.json()['detail'])
+        self.assertEqual(self.client.get(base+'/editorial/publications').json()['items'],[])
+
+    def test_migration_is_idempotent_and_preserves_content_fields(self):
+        slug,base,aid=self.seed()
+        self.client.put(base+'/content/'+aid,json={'title':'正常标题','summary':'摘要','body':LONG_BODY,'facts':FACTS,
+                                                  'channel':'公众号长文','audience':'制造企业负责人',
+                                                  'keywords':'设备资产管理系统','target_length':1200,'revision':1})
+        store.migrate(); store.migrate()
+        asset=self._asset(base,aid)
+        self.assertEqual(asset['channel'],'公众号长文')
+        self.assertEqual(asset['summary'],'摘要')
+        self.assertEqual(asset['audience'],'制造企业负责人')
+        self.assertEqual(asset['target_length'],1200)
+        self.assertEqual(asset['revision'],2)
+        self.assertEqual(asset['status'],'draft')
+
+    def test_review_marks_linked_action_done(self):
+        slug,base,aid=self.seed()
+        action_id=self._asset(base,aid)['action_id']
+        self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':LONG_BODY,'facts':FACTS,'revision':1})
+        self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True})
+        items={x['id']:x for x in self.client.get(base+'/editorial/actions').json()['items']}
+        self.assertEqual(items[action_id]['status'],'done')
 
     def test_migration_keeps_existing_assets(self):
         slug,base,aid=self.seed()
@@ -95,8 +241,15 @@ class EditorialTests(APITests):
         self.assertEqual(items[0]['source'],'diagnosis')
 
     def _approved(self, base, aid):
-        self.client.put(base+'/content/'+aid,json={'title':'测试内容','body':'正文（已核对）','facts':'来源 https://example.com','revision':1})
-        self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True})
+        asset=self._asset(base,aid)
+        saved=self.client.put(base+'/content/'+aid,json={'title':'测试内容','summary':'摘要',
+            'body':LONG_BODY,'facts':FACTS,'channel':'公众号长文','audience':'制造企业负责人',
+            'objective':'帮助选型','keywords':'设备资产管理系统','target_length':1200,
+            'revision':asset['revision']})
+        self.assertEqual(saved.status_code,200, saved.text)
+        review=self.client.post(base+'/content/'+aid+'/review',
+            json={'reviewer':'复核人','revision':saved.json()['revision'],'confirm':True})
+        self.assertEqual(review.status_code,200, review.text)
         return aid
 
     def test_platform_adapter_registry_covers_all_platforms(self):
