@@ -223,7 +223,7 @@ cd skill/geo-diagnosis-single && python -m unittest discover -s tests
 
 ## 许可与致谢
 
-本项目使用 **[PolyForm Noncommercial License 1.0.0](LICENSE)**（条款全文在 `LICENSE`，含中文说明）。
+本项目使用 **[PolyForm Noncommercial License 1.0.0](LICENSE)**（条款全文 `LICENSE`，中文说明 `LICENSE.zh.md`）。
 
 | | |
 |---|---|
