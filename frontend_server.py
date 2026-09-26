@@ -4,6 +4,8 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs, urlencode
 import sys
 
+from ports import port_busy
+
 ROOT=Path(__file__).resolve().parent
 ROUTES={'index.html':'workbench','dashboard.html':'workbench','projects.html':'projects',
         'diagnosis.html':'projects','new-project.html':'projects','tasks.html':'actions',
@@ -31,14 +33,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header('Cache-Control','no-store')
         self.send_header('X-Content-Type-Options','nosniff')
         super().end_headers()
-
-def port_busy(host='127.0.0.1', port=4173, timeout=1.0):
-    """True when something already answers on this host/port from another process."""
-    import socket
-    with socket.socket() as probe:
-        probe.settimeout(timeout)
-        return probe.connect_ex((host, port)) == 0
-
 
 if __name__ == '__main__':
     # Refuse to start alongside another server: a plain `python -m http.server`

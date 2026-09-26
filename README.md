@@ -27,6 +27,16 @@
 & 'python' start.py --status
 ```
 
+`start.py` 是「拉起就返回」的启动器（服务进程脱离本终端，日志落 `data/frontend.log` / `data/workflow-api.log`）。
+需要**一个长期存活的前台进程**来代表这个平台时（例如交给 `<project-dashboard>` 项目管理台托管，它的运行记录按「一个 PID + `taskkill /T`」管理），改用 `serve.py`：
+
+```powershell
+& 'python' serve.py
+# Ctrl+C 或结束该进程 = 前端与 API 一起停
+```
+
+两者不要同时用：`serve.py` 跑着时再跑 `start.py` 会因端口被占而失败（前端自身也会拒绝启动）。
+
 等价的手工方式（两个终端）：
 
 ```powershell
@@ -195,8 +205,11 @@
 ## 回归测试
 
 ```powershell
-& 'python' -m unittest test_workspace_core test_workflow_api test_editorial_flow test_engine_gates test_platform_login -q
+& 'python' -m unittest test_workspace_core test_workflow_api test_editorial_flow test_engine_gates test_platform_login test_port_probe -q
 & 'python' test_browser_flow.py
 ```
+
+端口存活探测（`ports.port_busy`）是 `start.py --status` 与 `frontend_server.py` 启动前检查共用的唯一实现。
+它以 `select` + `SO_ERROR` 判定，不把 connect 的"进行中"返回值（Windows 10035/10036/10037）当成端口空闲。
 
 浏览器回归使用临时 API 端口、临时数据库和临时浏览器，不发送任何外部问题。测试清理仅作用于自身临时目录。
