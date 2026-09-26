@@ -35,7 +35,6 @@ geo-platform-redesign-v1/            # 本仓库根目录 = 平台本体
 ├─ editorial_flow.py                 # 改善项 → 草稿 → 审核 → 发布
 ├─ publish_adapters.py / wechat_mp.py / browser_publisher.py / platform_login.py
 ├─ workspace.html / workspace.css / workspace.js    # 统一前端框架
-├─ legacy/                           # 旧版多页面原型（已废弃，保留供比对，不要启动）
 └─ skill/geo-diagnosis-single/       # 诊断引擎（也可作为独立 agent skill 使用）
     ├─ SKILL.md                      # 引擎入口文档
     ├─ scripts/                      # 浏览器驱动、执行器、报告渲染、拓词与资产工具
@@ -87,7 +86,7 @@ python serve.py            # 前台常驻（Ctrl+C = 前端与 API 一起停）
 
 ### 为什么必须用白名单服务
 
-`frontend_server.py` 只提供 `workspace.html/css/js`，其余旧入口重定向到统一框架；`data/`、`backups/`、`legacy/`、脚本与测试均不可下载；启动前还会检测 4173 是否已被占用。
+`frontend_server.py` 只提供 `workspace.html/css/js`，其余旧入口重定向到统一框架；`data/`、`backups/`、脚本与测试均不可下载；启动前还会检测 4173 是否已被占用。
 
 **不要用 `python -m http.server` 暴露本仓库目录。** 本项目真实发生过一次：一个残留的 `python -m http.server` 与白名单服务同时监听（前者监听 `0.0.0.0`），导致 `data/redesign.db` 能被局域网直接下载。该进程已终止，并加了「启动前检测端口占用」的保护。
 
