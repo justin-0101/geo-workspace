@@ -32,7 +32,7 @@ function md(text) {
  return out.join('');
 }
 const labels = {workbench:'工作台',projects:'诊断项目',actions:'改善任务',content:'内容生产',publications:'批量发布',reports:'报告中心',platforms:'模型与平台',settings:'设置'};
-const states = {archived:'已终止',degraded:'报告不完整',login:'等待登录',frozen:'待检查',preflight:'检查中',ready:'可执行',running:'执行中',paused:'等待人工处理',blocked:'需处理',interrupted:'已中断',completed:'已完成',pending:'待执行',success:'成功',failed:'失败',manual_required:'需人工处理'};
+const states = {archived:'已终止',degraded:'报告不完整',login:'等待登录',frozen:'待检查',preflight:'检查中',ready:'可执行',running:'执行中',paused:'等待人工处理',blocked:'需处理',interrupted:'已中断',completed:'已完成',pending:'待执行',success:'成功',failed:'失败',manual_required:'需人工处理',todo:'待办',doing:'进行中'};
 let epoch = 0, timer = null;
 const route = () => { const [view='workbench', query=''] = location.hash.slice(1).split('?'); return {view, params:new URLSearchParams(query)}; };
 const link = (view, project, tab) => '#'+view+(project?'?project='+encodeURIComponent(project)+(tab?'&tab='+tab:''):'');
@@ -40,7 +40,28 @@ async function api(path, method='GET', body) { const abort=new AbortController()
 function notice(text) { $('#notice').textContent=text; $('#notice').hidden=!text; }
 function head(title, action='') { return `<div class="page-head"><h1>${esc(title)}</h1>${action}</div>`; }
 function show(html, token) { if(token===epoch) $('#view').innerHTML=html; }
-function badge(state) { const tone=['completed','success','approved','已审核'].includes(state)?'good':['failed','interrupted','blocked'].includes(state)?'bad':['pending','frozen','manual_required','login','degraded'].includes(state)?'warn':'';return `<span class="badge ${tone}">${esc(states[state]||state)}</span>`; }
+const TONES={good:['completed','success','approved','已审核'],bad:['failed','interrupted','blocked'],warn:['pending','todo','frozen','manual_required','login','degraded']};
+const tone=s=>Object.keys(TONES).find(k=>TONES[k].includes(s))||'';
+function badge(state) { return `<span class="badge ${tone(state)}">${esc(states[state]||state)}</span>`; }
+const TAB_LABEL={overview:'概览',profile:'主体资料',config:'诊断配置',runs:'执行与结果'};
+// 面包屑：项目上下文的页面可以一步回到项目列表或项目概览；最后一段不带链接，带 aria-current
+function crumbHTML(view,project,tab){
+ const seg=[];
+ if(project){
+  const onOverview=view==='projects'&&(!tab||tab==='overview');
+  // 标签不用「诊断项目」：那和侧边导航同名，会让 get_by_role('link', name='诊断项目') 撞到两个元素。
+  // 这一段去的是项目列表，用「项目列表」既准确又不重名。
+  seg.push(['项目列表',link('projects')]);
+  seg.push([project.name,onOverview?null:link('projects',project.slug)]);
+  seg.push([view==='projects'?(TAB_LABEL[tab||'overview']||'概览'):(labels[view]||view),null]);
+ }else{
+  seg.push([labels[view]||'工作台',null]);
+ }
+ return seg.map(([text,href],i)=>{
+  if(i===seg.length-1)return `<span aria-current="page">${esc(text)}</span>`;
+  return (href?`<a href="${href}">${esc(text)}</a>`:`<span>${esc(text)}</span>`)+'<span class="crumb-sep">/</span>';
+ }).join('');
+}
 function modal(title, body, submit, button='确定') {
  const d=$('#modal'); $('#modal-title').textContent=title; $('#modal-body').innerHTML=body; $('#modal-error').textContent=''; $('#confirm-modal').textContent=button;
  $('#modal-form').onsubmit=async e=>{e.preventDefault(); const b=$('#confirm-modal');b.disabled=true;try{const result=await submit(new FormData(e.target));d.close();await render();if(result&&result.message)notice(result.message);}catch(err){$('#modal-error').textContent=err.message;}finally{b.disabled=false;}}; d.showModal();
@@ -52,7 +73,7 @@ async function render() {
  const context=params.get('project')||sessionStorage.getItem('geo-project');
  if(params.get('project'))sessionStorage.setItem('geo-project',params.get('project'));
  document.querySelectorAll('nav a').forEach(a=>{const target=a.hash.slice(1).split('?')[0];a.classList.toggle('active',target===view);a.href=link(target,['actions','content','publications','reports'].includes(target)?context:null);});
- $('#breadcrumb').textContent=labels[view]||'工作台';$('#project-context').textContent='';
+ $('#breadcrumb').innerHTML=crumbHTML(view,null,null);
  $('#view').innerHTML='<p class="muted">加载中…</p>';
  try {
  if(view==='workbench') {
@@ -65,7 +86,7 @@ async function render() {
   const slug=params.get('project'), base='/api/projects/'+encodeURIComponent(slug), d=await api(base), tab=params.get('tab')||'overview';
   const tabs=`<div class="tabs">${[['overview','概览'],['profile','主体资料'],['config','诊断配置'],['runs','执行与结果']].map(([k,v])=>`<a class="${tab===k?'active':''}" href="${link('projects',slug,k)}">${v}</a>`).join('')}</div>`;
   show(head(d.project.name,'<a class="button" href="#projects">返回项目列表</a>')+tabs+'<div id="project-view"></div>',token);if(token!==epoch)return;
-  $('#project-context').textContent=d.project.name;const v=$('#project-view'),p=d.profile;
+  $('#breadcrumb').innerHTML=crumbHTML('projects',d.project,tab);const v=$('#project-view'),p=d.profile;
   if(tab==='overview'){
    const o=await api(base+'/overview');if(token!==epoch)return;
    if(!o.generated){
@@ -82,7 +103,7 @@ async function render() {
    const hmax=Math.max(1,...hist.map(x=>Math.max(x.official_yes||0,x.mentions||0)));
    const line=(arr,key,max)=>arr.map((x,i)=>`${(arr.length===1?50:i*100/(arr.length-1)).toFixed(2)},${(100-((x[key]||0)/max)*100).toFixed(2)}`).join(' ');
    const chartBody=isTrend
-    ?`<div class="legend"><span><i></i>官方来源引用</span><span><i class="alt"></i>自然提及</span></div><div class="chart"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${line(hist,'official_yes',hmax)}" fill="none" stroke="#176b88" stroke-width="1.6" vector-effect="non-scaling-stroke"/><polyline points="${line(hist,'mentions',hmax)}" fill="none" stroke="#d97835" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg></div><div class="xlabels">${hist.map(x=>`<span>${esc(localDay(x.generated_at||x.created_at))}</span>`).join('')}</div>`
+    ?`<div class="legend"><span><i></i>官方来源引用</span><span><i class="alt"></i>自然提及</span></div><div class="chart"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${line(hist,'official_yes',hmax)}" vector-effect="non-scaling-stroke"/><polyline class="alt" points="${line(hist,'mentions',hmax)}" vector-effect="non-scaling-stroke"/></svg></div><div class="xlabels">${hist.map(x=>`<span>${esc(localDay(x.generated_at||x.created_at))}</span>`).join('')}</div>`
     :`<div class="legend"><span><i></i>有效回答</span><span><i class="alt"></i>官方来源引用</span></div><div class="qchart">${qs.map(q=>`<div class="qgroup"><div class="qbars"><i style="height:${Math.round((q.answered||0)/qmax*100)}%"></i><i class="alt" style="height:${Math.round((q.official_yes||0)/qmax*100)}%"></i></div><span>${esc(q.id)}</span></div>`).join('')}</div>`;
    const conclusion=`非品牌题 ${k.non_brand_success} 条有效回答中，自然提及 ${k.mentions} 次、明确推荐 ${k.recommendations} 次；官方来源引用命中 ${citedYes} 条（覆盖 ${citedYes}/${k.planned} 题）。`;
    v.innerHTML=`
@@ -90,11 +111,11 @@ async function render() {
    <section class="summary"><div><span class="chip ${c.percent>=100?'good':'warn'}">证据完整度 ${c.percent}%</span><p class="summary-line">${esc(conclusion)}</p></div><div class="summary-meta"><span>边界</span><p class="muted">时点快照，不复测、不推断趋势、不做平台排名。</p></div></section>
    <div class="ov-grid ov-2">
     <section class="card hero"><p class="eyebrow">核心指标</p><div class="hero-main"><span class="muted">非品牌题自然提及率</span><strong>${mentionRate}%</strong><span class="muted">${k.mentions} 次提及 / ${k.non_brand_success} 条有效回答</span></div><div class="hero-grid"><div><span>明确推荐</span><strong>${k.recommendations}</strong></div><div><span>官方来源覆盖</span><strong>${citedYes}/${k.planned}</strong>${bar(citedYes,k.planned)}</div><div><span>引用记录</span><strong>${k.citations}</strong></div><div><span>任务完成</span><strong>${k.success}/${k.planned}</strong>${bar(k.success,k.planned)}</div></div></section>
-    <section class="card"><div class="card-head"><div><h2>证据完整度</h2><p>有完整证据的终态任务占比</p></div></div><div class="score-body"><div class="donut" style="background:conic-gradient(#176b88 0 ${c.percent}%,#dfecef ${c.percent}% 100%)"><div class="score-value"><strong>${c.percent}%</strong><small>${c.complete}/${c.planned}</small></div></div><div class="score-copy"><strong>${c.percent>=100?'本批次证据齐全':(c.percent>=80?'基本齐全，有少量缺口':'缺口较多，报告不完整')}</strong><ul class="fact-list">${(o.incomplete||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>全部任务均有回答与截图证据</li>'}</ul></div></div></section>
+    <section class="card"><div class="card-head"><div><h2>证据完整度</h2><p>有完整证据的终态任务占比</p></div></div><div class="score-body"><div class="donut" style="background:conic-gradient(var(--blue) 0 ${c.percent}%,var(--line) ${c.percent}% 100%)"><div class="score-value"><strong>${c.percent}%</strong><small>${c.complete}/${c.planned}</small></div></div><div class="score-copy"><strong>${c.percent>=100?'本批次证据齐全':(c.percent>=80?'基本齐全，有少量缺口':'缺口较多，报告不完整')}</strong><ul class="fact-list">${(o.incomplete||[]).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>全部任务均有回答与截图证据</li>'}</ul></div></div></section>
    </div>
    <div class="ov-grid ov-2">
     <section class="card"><div class="card-head"><div><h2>${isTrend?'批次趋势':'问题维度分布'}</h2><p>${isTrend?'按批次对比官方来源引用与自然提及':'每个问题的有效回答与官方来源引用；第二次诊断后这里显示变化趋势'}</p></div></div><div class="chart-wrap">${chartBody}</div></section>
-    <section class="card"><div class="card-head"><div><h2>平台对比</h2><p>成功/失败与提及、引用</p></div></div><div class="table-scroll"><table><thead><tr><th>平台</th><th>成功</th><th>失败</th><th>提及</th><th>引用</th></tr></thead><tbody>${(o.platforms||[]).map(x=>`<tr><td>${esc(x.label)}</td><td>${x.success}</td><td>${x.failed}</td><td>${x.non_brand_mention}</td><td>${x.official_citation_yes}</td></tr>`).join('')||'<tr><td colspan="5">暂无</td></tr>'}</tbody></table></div></section>
+    <section class="card"><div class="card-head"><div><h2>平台对比</h2><p>成功/失败与提及、引用</p></div></div><div class="table-scroll"><table class="num-table"><thead><tr><th>平台</th><th>成功</th><th>失败</th><th>提及</th><th>引用</th></tr></thead><tbody>${(o.platforms||[]).map(x=>`<tr><td>${esc(x.label)}</td><td>${x.success}</td><td>${x.failed}</td><td>${x.non_brand_mention}</td><td>${x.official_citation_yes}</td></tr>`).join('')||'<tr><td colspan="5">暂无</td></tr>'}</tbody></table></div></section>
    </div>
    <div class="ov-grid ov-2">
     <section class="card"><div class="card-head"><div><h2>引用来源分布</h2><p>本次诊断引用到的域名，最多 8 个</p></div></div><div class="bars">${(o.domains||[]).map(x=>`<div class="bar-row"><div><div class="bar-name">${esc(x[0])}</div>${bar(x[1],domMax)}</div><div class="bar-count">${x[1]}</div></div>`).join('')||'<p class="empty">本批次没有抽取到来源链接</p>'}</div></section>
@@ -121,11 +142,27 @@ async function render() {
    const operations=r.status==='ready'?[['execute','开始诊断'],['close-browser','关闭诊断浏览器']]:r.status==='login'?[['resume','已完成登录'],['close-browser','关闭诊断浏览器'],['stop','停止']]:r.status==='running'?[['resume','已处理验证'],['stop','停止']]:r.status==='preflight'?[['stop','停止']]:['frozen','blocked','interrupted'].includes(r.status)?[['preflight','检查环境'],['login','打开登录窗口'],['close-browser','关闭诊断浏览器']]:[];
    if(['frozen','blocked','interrupted','ready'].includes(r.status))operations.push(['archive','终止本批次']);
    if(r.status==='interrupted' && r.tasks.length && r.tasks.every(t=>['success','failed'].includes(t.status)))operations.push(['report','重新生成报告']);
-   v.innerHTML=`<section class="panel"><div class="toolbar"><select id="batch" aria-label="诊断批次">${d.runs.map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(localTime(x.created_at))} · ${esc(states[x.status]||x.status)}</option>`).join('')}</select>${badge(r.status)}${operations.map(([k,l])=>`<button data-op="${k}" class="${k==='execute'?'primary':''}">${l}</button>`).join('')}</div>${r.paused?`<div class="panel" style="margin:0 0 18px;background:var(--orange2);border-color:#f0d5c3"><strong>平台要求人工验证，执行已暂停</strong><p class="muted" style="margin:8px 0">待处理：${esc((r.waiting_tasks||[]).join('、'))}。请在已打开的浏览器窗口完成登录或验证码，然后点击“已处理验证”继续。系统不会重新提交本题问题。</p></div>`:''}${r.blocker?`<p class="muted">${esc(r.blocker)}</p>`:''}${(r.preflight||[]).length?`<p class="muted">平台检查：${r.preflight.map(c=>`${esc(c.platform)} ${c.check==='OK'?(c.login_state_guess==='logged_in'?'已登录':'未登录'):'打不开'}`).join(' · ')}</p>`:''}<p>成功 ${r.state.success||0} · 失败 ${r.state.failed||0} · 待执行 ${r.state.pending||0}</p><div class="table-scroll"><table><thead><tr><th>任务</th><th>平台</th><th>状态</th><th>结果</th></tr></thead><tbody>${r.tasks.map(t=>`<tr><td><strong>${esc(t.question_id)}</strong><div class="muted" style="max-width:480px;margin-top:5px">${esc(t.prompt)}</div></td><td>${esc(t.platform_label)}</td><td>${badge(t.status)}</td><td>${r.observations.some(o=>o.task_id===t.task_id)?`<button data-result="${esc(t.task_id)}">查看回答与证据</button>`:esc(t.failure_reason||'')}</td></tr>`).join('')}</tbody></table></div></section>`;
+   v.innerHTML=`<section class="panel"><div class="toolbar"><select id="batch" aria-label="诊断批次">${d.runs.map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(localTime(x.created_at))} · ${esc(states[x.status]||x.status)}</option>`).join('')}</select>${badge(r.status)}${operations.map(([k,l])=>`<button data-op="${k}" class="${k==='execute'?'primary':''}">${l}</button>`).join('')}</div>${r.paused?`<div class="panel" style="margin:0 0 18px;background:var(--orange2);border-color:var(--notice-line)"><strong>平台要求人工验证，执行已暂停</strong><p class="muted" style="margin:8px 0">待处理：${esc((r.waiting_tasks||[]).join('、'))}。请在已打开的浏览器窗口完成登录或验证码，然后点击“已处理验证”继续。系统不会重新提交本题问题。</p></div>`:''}${r.blocker?`<p class="muted">${esc(r.blocker)}</p>`:''}${(r.preflight||[]).length?`<p class="muted">平台检查：${r.preflight.map(c=>`${esc(c.platform)} ${c.check==='OK'?(c.login_state_guess==='logged_in'?'已登录':'未登录'):'打不开'}`).join(' · ')}</p>`:''}<p>成功 ${r.state.success||0} · 失败 ${r.state.failed||0} · 待执行 ${r.state.pending||0}</p><div class="table-scroll"><table><thead><tr><th>任务</th><th>平台</th><th>状态</th><th>结果</th></tr></thead><tbody>${r.tasks.map(t=>`<tr><td><strong>${esc(t.question_id)}</strong><div class="muted" style="max-width:480px;margin-top:5px">${esc(t.prompt)}</div></td><td>${esc(t.platform_label)}</td><td>${badge(t.status)}</td><td>${r.observations.some(o=>o.task_id===t.task_id)?`<button data-result="${esc(t.task_id)}" aria-expanded="false">查看回答与证据</button>`:esc(t.failure_reason||'')}</td></tr>`).join('')}</tbody></table></div></section>`;
    if(['completed','degraded'].includes(r.status)){v.insertAdjacentHTML('afterbegin','<div class="toolbar"><button id="derive" class="primary">生成改善任务</button></div>');$('#derive').onclick=async()=>{try{const out=await api(base+'/runs/'+selected+'/improvements/derive','POST',{});notice(out.created?`已生成 ${out.created} 条改善任务`:'没有新的可生成项（仅取有证据的成功观测）');location.hash=link('actions',slug);}catch(err){notice(err.message);}};}
    $('#batch').onchange=e=>{location.hash=link('projects',slug,'runs')+'&run='+encodeURIComponent(e.target.value);};
    document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>modal(b.textContent,b.dataset.op==='execute'?'<p>将向所选平台提交冻结问题。请确认主体资料可用于本次诊断。</p>':'<p>确认执行此操作？</p>',()=>api(base+'/runs/'+selected+'/'+b.dataset.op,'POST',{confirm:true}),b.textContent));
-   document.querySelectorAll('[data-result]').forEach(b=>b.onclick=()=>{const o=r.observations.find(x=>x.task_id===b.dataset.result);const panel=document.createElement('section');panel.className='panel';panel.id='observation-detail';$('#observation-detail')?.remove();panel.innerHTML=`<div class="page-head"><h2>${esc(o.task_id)} 回答与证据</h2><button id="close-evidence">收起</button></div><pre>${esc(o.response_text||o.failure_reason||'无回答')}</pre>${(o.evidence_files||[]).map(f=>{const url=API+base+'/runs/'+selected+'/files/'+f.split('/').map(encodeURIComponent).join('/');return /\.(png|jpg|jpeg|webp)$/i.test(f)?`<figure><img style="max-width:100%" src="${esc(url)}" alt="${esc(f)}"><figcaption>${esc(f)}</figcaption></figure>`:`<a class="button" href="${esc(url)}" download>下载 ${esc(f)}</a>`;}).join('')}`;v.append(panel);$('#close-evidence').onclick=()=>panel.remove();panel.scrollIntoView({block:'start'});});
+   // 行内展开：详情插在被点那一行下面。同一时刻只开一行，再点一次收起
+   document.querySelectorAll('[data-result]').forEach(b=>b.onclick=()=>{
+    const o=r.observations.find(x=>x.task_id===b.dataset.result),row=b.closest('tr');
+    const wasOpen=row.nextElementSibling&&row.nextElementSibling.classList.contains('evidence-row');
+    document.querySelectorAll('.evidence-row').forEach(x=>x.remove());
+    document.querySelectorAll('[data-result]').forEach(x=>x.setAttribute('aria-expanded','false'));
+    if(wasOpen)return;
+    b.setAttribute('aria-expanded','true');
+    const files=(o.evidence_files||[]).map(f=>{const url=API+base+'/runs/'+selected+'/files/'+f.split('/').map(encodeURIComponent).join('/');return /\.(png|jpg|jpeg|webp)$/i.test(f)?`<figure><img style="max-width:100%" src="${esc(url)}" alt="${esc(f)}"><figcaption>${esc(f)}</figcaption></figure>`:`<a class="button" href="${esc(url)}" download>下载 ${esc(f)}</a>`;}).join('');
+    const meta=`${esc(o.task_id)} · ${esc(o.platform_label)} · ${esc(states[o.status]||o.status)} · ${esc(localTime(o.attempted_at))}`;
+    const tr=document.createElement('tr');tr.className='evidence-row';
+    const answer=o.response_text||o.failure_reason||'无回答';
+    const answerLabel=o.response_text?'回答正文':(o.failure_reason?'失败原因':'无内容');
+    const held=files?`<p class="eyebrow" style="margin:16px 0 8px">证据文件</p>${files}`:'';
+    tr.innerHTML=`<td colspan="4"><div class="stage"><div class="stage-body"><p class="eyebrow">${answerLabel}</p><pre>${esc(answer)}</pre>${held}</div><p class="stage-status ${tone(o.status)}">${meta}</p></div></td>`;
+    row.insertAdjacentElement('afterend',tr);tr.scrollIntoView({block:'center'});
+   });
    if(['running','preflight','login'].includes(r.status)){const poll=()=>{if(token!==epoch)return;if($('#modal').open){timer=setTimeout(poll,2000);return;}render();};timer=setTimeout(poll,5000);}
   }
  } else if(view==='settings') {
@@ -137,17 +174,44 @@ async function render() {
   show(head(labels[view])+`<div class="toolbar"><select id="scope" aria-label="当前项目"><option value="">选择项目</option>${projects.map(p=>`<option value="${p.slug}" ${p.slug===chosen?.slug?'selected':''}>${esc(p.name)}</option>`).join('')}</select>${!projects.length?'<button id="create">创建项目</button>':''}</div><div id="module"></div>`,token);
   if(token!==epoch)return;$('#scope').onchange=e=>{sessionStorage.setItem('geo-project',e.target.value);location.hash=link(view,e.target.value);};if($('#create'))$('#create').onclick=createProject;
   if(!chosen){$('#module').innerHTML='<p class="empty">请选择需要处理的项目</p>';return;}
-  $('#project-context').textContent=chosen.name;const base='/api/projects/'+chosen.slug;
+  $('#breadcrumb').innerHTML=crumbHTML(view,chosen,null);const base='/api/projects/'+chosen.slug;
   if(view==='reports') {
    const items=(await api(base+'/reports')).reports;if(token!==epoch)return;
-   $('#module').innerHTML=`<section class="panel">${items.map((r,i)=>`<div class="row"><span>${esc(r.name)} <small>${esc(r.run_id)}</small></span><button data-report="${i}">查看</button></div>`).join('')||'<p class="empty">尚无报告</p>'}</section><section id="report-text" hidden class="panel"></section>`;
-   document.querySelectorAll('[data-report]').forEach(b=>b.onclick=async()=>{try{const r=items[Number(b.dataset.report)],d=await api(base+'/runs/'+r.run_id+'/text/report/'+encodeURIComponent(r.name));$('#report-text').hidden=false;$('#report-text').className='panel report';$('#report-text').innerHTML=`<h2>${esc(r.name)}</h2>`+md(d.text);}catch(err){notice(err.message);}});
+   // 报告名用文档自己的首个标题；文件名与元信息放极小字行，避免两层标题重复
+   const isRaw=n=>/\.json$/i.test(n);
+   const purpose={'diagnosis.md':'诊断正文：本次 GEO 现状与结论','optimization-plan.md':'优化执行方案：逐条整改项与依据','QUALITY_REPORT.md':'数据质量报告：本次采集的可信度','TEXT_CHECK.md':'文案体检：模板泄漏与主体一致性检查','manual-review.md':'人工复核清单：需要你确认的待定项','metrics.json':'指标原始数据：本批次全部计数'};
+   const rtab=params.get('rview')==='raw'?'raw':'report';
+   const group=items.filter(x=>rtab==='raw'?isRaw(x.name):!isRaw(x.name));
+   const nMd=items.filter(x=>!isRaw(x.name)).length,nRaw=items.filter(x=>isRaw(x.name)).length;
+   const tabs=`<div class="tabs"><a class="${rtab==='report'?'active':''}" href="${link('reports',chosen.slug)}">诊断报告<span class="tabs-count">${nMd}</span></a><a class="${rtab==='raw'?'active':''}" href="${link('reports',chosen.slug)}&rview=raw">原始数据<span class="tabs-count">${nRaw}</span></a></div>`;
+   $('#module').innerHTML=tabs+`<section class="panel">${group.map((r,i)=>`<div class="row"><span>${esc(r.name)}<small>${esc(purpose[r.name]||'')}</small></span><button data-report="${i}">查看</button></div>`).join('')||`<p class="empty">${rtab==='raw'?'本批次没有原始数据文件':'本批次没有报告文件'}</p>`}</section><section id="report-text" hidden class="panel"></section>`;
+   document.querySelectorAll('[data-report]').forEach(b=>b.onclick=async()=>{try{
+    const r=group[Number(b.dataset.report)],d=await api(base+'/runs/'+r.run_id+'/text/report/'+encodeURIComponent(r.name));
+    const raw=isRaw(r.name);
+    const title=raw?r.name:(d.text.match(/^\s*#\s+(.+)$/m)||[,r.name])[1].trim();
+    const body=raw?`<pre class="raw">${esc(d.text)}</pre>`:md(d.text.replace(/^\s*#\s+.*(\r?\n)?/,''));
+    const meta=`${esc(states[r.status]||r.status)} · ${esc(chosen.name)} · 批次 ${esc(r.run_id.slice(0,8))}`;
+    const bytes=new TextEncoder().encode(d.text).length,lines=d.text.split('\n').length;
+    const stamp=(d.text.match(/(?:生成时间|generated_at)["\s：:]*([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}(?:Z|[+-][0-9]{2}:?[0-9]{2})?)/)||[])[1];
+    const dl=API+base+'/runs/'+r.run_id+'/files/report/'+encodeURIComponent(r.name);
+    const rail=[
+     ['操作',`<div class="rail-actions"><button id="copy-body" class="primary" type="button">复制正文</button><a class="button" href="${esc(dl)}" download>下载文件</a></div>`],
+     ['文件',`<div class="rail-rows"><div class="rail-row"><span>名称</span><strong>${esc(r.name)}</strong></div><div class="rail-row"><span>大小</span><strong id="rail-size">${bytes} 字节</strong></div><div class="rail-row"><span>行数</span><strong>${lines}</strong></div></div>`],
+     ['批次',`<div class="rail-rows"><div class="rail-row"><span>编号</span><strong>${esc(r.run_id.slice(0,8))}</strong></div>${stamp?`<div class="rail-row"><span>生成</span><strong>${esc(localTime(stamp))}</strong></div>`:''}<div class="rail-row"><span>状态</span>${badge(r.status)}</div></div>`],
+     ['相关',`<div class="rail-actions"><a class="button" href="${link('projects',chosen.slug,'runs')}&run=${encodeURIComponent(r.run_id)}">执行与结果</a><a class="button" href="${link('reports',chosen.slug)}&rview=raw">原始数据</a></div>`]
+    ].map(([label,html])=>`<section class="rail-block"><p class="eyebrow">${label}</p>${html}</section>`).join('');
+    const box=$('#report-text');box.hidden=false;box.className='report-wrap';
+    box.innerHTML=`<div class="report-layout"><div><div class="page-head"><div><h2 style="margin:0">${esc(title)}</h2><p class="eyebrow" style="margin:5px 0 0">${meta} · ${esc(r.name)}</p><p class="muted" style="margin:7px 0 0">${esc(purpose[r.name]||'')}</p></div></div><div class="stage"><div class="${raw?'stage-body':'report'}">${body}</div><p class="stage-status ${tone(r.status)}">渲染于 ${esc(localTime(new Date().toISOString()))} · ${meta}</p></div></div><div class="report-rail">${rail}</div></div>`;
+    $('#copy-body').onclick=async()=>{try{await navigator.clipboard.writeText(d.text);notice(`已复制 ${r.name} 全文（${d.text.length} 字）`);}catch(e){notice('复制失败，请手动选中正文');}};
+    // 先显示按正文算出的字节，再用真实下载下来的字节数盖掉（该端点不支持 HEAD，HEAD 会拿到 405 的响应体长度）
+    fetch(dl).then(x=>x.arrayBuffer()).then(b=>{if($('#rail-size'))$('#rail-size').textContent=b.byteLength+' 字节';}).catch(()=>{});
+   }catch(err){notice(err.message);}});
    const wantRun=params.get('run');
-   if(wantRun){const i=items.findIndex(r=>r.run_id===wantRun&&r.name==='diagnosis.md');if(i>=0)document.querySelector(`[data-report="${i}"]`)?.click();}
+   if(wantRun&&rtab==='report'){const i=group.findIndex(r=>r.run_id===wantRun&&r.name==='diagnosis.md');if(i>=0)document.querySelector(`[data-report="${i}"]`)?.click();}
   } else {
    const items=(await api(base+'/editorial/'+view)).items;if(token!==epoch)return;
    if(view==='actions') {
-    $('#module').innerHTML=`<section class="panel">${items.map(x=>`<div class="row"><div><strong>${esc(x.title)}</strong><p class="muted">${esc(x.description)}</p><a href="${link('projects',chosen.slug,'runs')+'&run='+x.run_id}">查看诊断依据</a></div><button data-create-asset="${x.id}">编写内容</button></div>`).join('')||'<p class="empty">暂无改善任务。完成诊断后可从结果生成。</p>'}</section>`;
+    $('#module').innerHTML=`<section class="panel">${items.map(x=>`<div class="row"><div><strong>${esc(x.title)}</strong> ${badge(x.status)}<p class="muted">${esc(x.description)}</p><a href="${link('projects',chosen.slug,'runs')+'&run='+x.run_id}">查看诊断依据</a></div><button data-create-asset="${x.id}">编写内容</button></div>`).join('')||'<p class="empty">暂无改善任务。完成诊断后可从结果生成。</p>'}</section>`;
     document.querySelectorAll('[data-create-asset]').forEach(b=>b.onclick=async()=>{try{const x=await api(base+'/actions/'+b.dataset.createAsset+'/content','POST',{});location.hash=link('content',chosen.slug)+'&asset='+x.id;}catch(err){notice(err.message);}});
    } else if(view==='content') {
     const asset=items.find(x=>x.id===params.get('asset'));
@@ -184,7 +248,7 @@ async function render() {
       </div></section>
      ${canPublish?'':`<section class="panel"><h2>先准备一条已审核内容</h2><p class="muted">只能发布当前版本审核通过的内容。${drafts.length?`当前有 ${drafts.length} 条草稿待审核。`:'当前还没有内容。'}</p><div class="toolbar"><a class="button primary" href="${link('content',chosen.slug)}">去内容生产</a><a class="button" href="${link('actions',chosen.slug)}">从改善任务开始</a></div></section>`}
      <section class="panel" id="login-panel"><div class="card-head"><div><h2>平台登录状态</h2><p>点「打开登录窗口」→ 在弹出的窗口里自己登录 → 登录成功会自动识别；全部识别到已登录后窗口自动关闭</p></div><div class="toolbar" style="margin:0"><button id="probe-login">重新检测</button><button id="login" class="primary">打开登录窗口</button></div></div><p class="muted" id="login-msg">${esc(loginSummary(loginState))}</p><div class="table-scroll"><table><thead><tr><th>平台</th><th>登录状态</th><th>最近识别</th><th>说明</th><th>操作</th></tr></thead><tbody id="login-rows">${loginRows(loginState)}</tbody></table></div><p class="muted" style="margin:12px 0 0">登录态存在本机隔离浏览器 profile 里，不写数据库、不导出 cookie；系统只读页面判断状态，不代填账号密码。</p></section>
-     <section class="panel"><div class="card-head"><div><h2>选择内容</h2><p>只列出当前版本审核通过的内容</p></div></div><div style="padding-top:4px">${approved.map(a=>`<label class="check" style="padding:10px 0;border-bottom:1px solid #edf0f1"><input type="checkbox" name="pick-asset" value="${a.id}">${esc(a.title)}</label>`).join('')||'<p class="empty">没有已审核内容</p>'}</div></section>
+     <section class="panel"><div class="card-head"><div><h2>选择内容</h2><p>只列出当前版本审核通过的内容</p></div></div><div style="padding-top:4px">${approved.map(a=>`<label class="check" style="padding:10px 0;border-bottom:1px solid var(--line-soft)"><input type="checkbox" name="pick-asset" value="${a.id}">${esc(a.title)}</label>`).join('')||'<p class="empty">没有已审核内容</p>'}</div></section>
      <section class="panel"><div class="card-head"><div><h2>选择平台</h2><p>每个平台的执行方式与前置条件</p></div></div><div class="table-scroll" style="padding-top:6px"><table><thead><tr><th>选择</th><th>平台</th><th>执行方式</th><th>前置条件</th></tr></thead><tbody>${caps.map(p=>`<tr><td><input type="checkbox" name="pick-platform" value="${p.id}"></td><td>${esc(p.label)}</td><td>${esc(p.mode_label)}</td><td class="muted">${esc(p.mode==='api'?(p.credentials.every(c=>c.configured)?'凭据已配置':'需先配置 AppID/AppSecret'):(p.mode==='browser'?'需在隔离浏览器登录该平台':'无自动接口，发布后回填链接'))}${needsCover(p.id)?' · 需要封面图':''}</td></tr>`).join('')}</tbody></table></div></section>
      <section class="panel"><div class="card-head"><div><h2>发布记录</h2><p>每个内容 × 平台的结果、原因与证据</p></div></div><div style="padding-top:6px">${items.map(x=>`<div class="row"><div><strong>${esc(x.title_snapshot)}</strong><small>${esc((names[x.platform]||{}).label||x.platform)} · ${esc((names[x.platform]||{}).mode_label||x.mode||'')} · <span class="badge ${(st[x.status]||[])[1]||''}">${esc((st[x.status]||[x.status])[0])}</span></small>${x.adapter_note?`<small class="muted">${esc(x.adapter_note)}</small>`:''}${x.receipt_url?`<small>${esc(x.receipt_url)}</small>`:''}</div><div class="toolbar" style="margin:0">${['manual_required','failed'].includes(x.status)?`<button data-receipt="${x.id}">回填发布链接</button>`:''}</div></div>`).join('')||'<p class="empty">还没有发布记录。勾选内容和平台后点「确认发布」。</p>'}</div></section>
      <details class="panel"><summary style="cursor:pointer"><strong>平台接入与凭据（${caps.length} 个）</strong> <span class="muted">公众号可填 AppID/AppSecret；其余平台用浏览器登录</span></summary><div class="table-scroll" style="padding-top:12px"><table><thead><tr><th>平台</th><th>执行方式</th><th>接口状态</th><th>内容要素</th><th>操作</th></tr></thead><tbody>${caps.map(p=>`<tr><td>${esc(p.label)}</td><td>${esc(p.mode_label)}</td><td>${p.mode==='manual'?'<span class="badge warn">人工</span>':(p.can_attempt?'<span class="badge good">可执行</span>':'<span class="badge warn">待配置</span>')}</td><td>${p.requires.map(r=>esc(elem[r]||r)).join('、')}</td><td>${p.id==='wechat_mp'?`<button data-cred="${p.id}">${wechatReady?'修改凭据':'填写凭据'}</button> <button data-checkcred="${p.id}">校验</button>`:(p.mode==='browser'?'<a class="button" href="#" data-login="1">登录窗口</a>':'—')}</td></tr>`).join('')}</tbody></table></div><p class="muted" style="margin:12px 0 0">${esc(wechat.entry||'')}${wechat.note?' · '+esc(wechat.note):''}</p></details>`;
