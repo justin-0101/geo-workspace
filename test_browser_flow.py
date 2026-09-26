@@ -166,18 +166,37 @@ def main():
                     page.get_by_label('内容已审核，同意按上述方式发布').check()
                     page.locator('#confirm-modal').click()
                     expect(page.get_by_text('转人工',exact=True).first).to_be_visible()
+                    # 先等发布记录真的落库，再做夹具：之前直接查库是竞态（UI 上出现“转人工”
+                    # 不等于 API 已经写完库），偶发拿到 None 而报 TypeError。
+                    db_path = Path(tmp) / 'redesign.db'
+                    row = None
+                    deadline = time.time() + 15
+                    while time.time() < deadline:
+                        link_db = sqlite3.connect(db_path)
+                        try:
+                            row = link_db.execute(
+                                'SELECT id,project_slug,asset_id,asset_revision,title_snapshot,body_snapshot'
+                                ' FROM publishing_jobs LIMIT 1').fetchone()
+                        finally:
+                            link_db.close()
+                        if row:
+                            break
+                        time.sleep(0.25)
+                    self_check = page.locator('#notice').inner_text() if page.locator('#notice').count() else ''
+                    assert row, f'发布后 15 秒内没有写入发布记录；页面提示={self_check[:160]!r}'
                     # 再插一条已完结的发布记录，让「只看待处理」能真的减掉行数（
                     # 这是回归：以前「待处理 N」是页签链接里的角标，看着像按钮但点了没反应。
-                    with sqlite3.connect(Path(tmp) / 'redesign.db') as db:
-                        row = db.execute('SELECT id,project_slug,asset_id,asset_revision,title_snapshot,body_snapshot'
-                                         ' FROM publishing_jobs LIMIT 1').fetchone()
+                    db = sqlite3.connect(db_path)
+                    try:
                         db.execute('INSERT INTO publishing_jobs(id,project_slug,asset_id,platform,asset_revision,'
                                    'title_snapshot,body_snapshot,status,operator,mode,adapter_note,created_at,updated_at)'
                                    ' VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
                                    ('fixture-settled', row[1], row[2], 'official_site', row[3], row[4], row[5],
                                     'submitted', '隔离测试', 'browser', '夹具：已提交',
                                     '2026-09-20T08:00:00+00:00', '2026-09-20T08:00:00+00:00'))
-                    db.close()
+                        db.commit()
+                    finally:
+                        db.close()
                     page.get_by_role('link',name='发布记录').click()
                     expect(page.locator('#tabs .tabs-count.warn')).to_have_count(0)   # 页签上不再有粘连的「待处理」角标
                     expect(page.locator('.rec-item')).to_have_count(2)
