@@ -11,6 +11,10 @@ ROUTES={'index.html':'workbench','dashboard.html':'workbench','projects.html':'p
         'diagnosis.html':'projects','new-project.html':'projects','tasks.html':'actions',
         'content-production.html':'content','publication.html':'publications','reports.html':'reports',
         'platforms.html':'platforms','settings.html':'settings','compare.html':'projects'}
+#: 这些入口映射到默认视图，重定向时刻意不带 fragment。
+#: 带上会覆盖访问者原本的 #视图（重定向目标的 fragment 优先于原请求），
+#: 不带时浏览器会沿用原 fragment；完全没带时前端自己落到工作台。
+ENTRY_ROUTES={'index.html','dashboard.html'}
 PUBLIC={'workspace.html','workspace.css','workspace.js'}
 
 class Handler(SimpleHTTPRequestHandler):
@@ -21,7 +25,8 @@ class Handler(SimpleHTTPRequestHandler):
             query=parse_qs(parsed.query);args={}
             if name!='dashboard.html' and query.get('project'):args['project']=query['project'][0]
             if name=='diagnosis.html' and args:args['tab']='runs'
-            target='/workspace.html#'+ROUTES[name]+('?' + urlencode(args) if args else '')
+            frag='' if name in ENTRY_ROUTES else '#'+ROUTES[name]
+            target='/workspace.html'+frag+('?' + urlencode(args) if args else '')
             self.send_response(302);self.send_header('Location',target);self.send_header('Cache-Control','no-store');self.end_headers();return
         if name not in PUBLIC:self.send_error(404);return
         super().do_GET()
