@@ -155,7 +155,30 @@ def main():
                     page.get_by_label('内容已审核，同意按上述方式发布').check()
                     page.locator('#confirm-modal').click()
                     expect(page.get_by_text('转人工',exact=True).first).to_be_visible()
+                    # 再插一条已完结的发布记录，让「只看待处理」能真的减掉行数（
+                    # 这是回归：以前「待处理 N」是页签链接里的角标，看着像按钮但点了没反应。
+                    with sqlite3.connect(Path(tmp) / 'redesign.db') as db:
+                        row = db.execute('SELECT id,project_slug,asset_id,asset_revision,title_snapshot,body_snapshot'
+                                         ' FROM publishing_jobs LIMIT 1').fetchone()
+                        db.execute('INSERT INTO publishing_jobs(id,project_slug,asset_id,platform,asset_revision,'
+                                   'title_snapshot,body_snapshot,status,operator,mode,adapter_note,created_at,updated_at)'
+                                   ' VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                                   ('fixture-settled', row[1], row[2], 'official_site', row[3], row[4], row[5],
+                                    'submitted', '隔离测试', 'browser', '夹具：已提交',
+                                    '2026-09-20T08:00:00+00:00', '2026-09-20T08:00:00+00:00'))
+                    db.close()
                     page.get_by_role('link',name='发布记录').click()
+                    expect(page.locator('#tabs .tabs-count.warn')).to_have_count(0)   # 页签上不再有粘连的「待处理」角标
+                    expect(page.locator('.rec-item')).to_have_count(2)
+                    filter_btn=page.locator('#rec-filter')
+                    expect(filter_btn).to_have_text('只看待处理（1）')
+                    filter_btn.click()
+                    expect(page.locator('.rec-item')).to_have_count(1)                # 真的筛掉了已完结那条
+                    expect(page.locator('#rec-filter')).to_have_attribute('aria-pressed','true')
+                    expect(page.locator('#pane')).to_contain_text('当前只显示待处理')
+                    page.locator('#rec-filter').click()
+                    expect(page.locator('.rec-item')).to_have_count(2)
+                    checks.append('pending filter is a real control, not a glued badge')
                     expect(page.get_by_role('button',name='回填链接',exact=True).first).to_be_visible()
                     page.get_by_role('button',name='回填链接',exact=True).first.click()
                     page.get_by_label('发布链接',exact=True).fill('https://example.com/test-fixture')

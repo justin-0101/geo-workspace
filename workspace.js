@@ -47,6 +47,8 @@ const states = {archived:'已终止',degraded:'报告不完整',login:'等待登
 let epoch = 0, timer = null;
 // 批量发布的勾选与页签指示条几何：跨重渲染、跨轮询都要保住
 let pubPicked = [], pubPlats = [], pubTabGeo = null;
+// 发布记录是否只看待处理（筛选按钮的真状态，跨重渲染保留）
+let recOnlyPending = false;
 const route = () => { const [rawView='', query=''] = location.hash.slice(1).split('?'); return {view:rawView||'workbench', params:new URLSearchParams(query)}; };
 const link = (view, project, tab) => '#'+view+(project?'?project='+encodeURIComponent(project)+(tab?'&tab='+tab:''):'');
 async function api(path, method='GET', body) { const abort=new AbortController(),deadline=setTimeout(()=>abort.abort(),20000);try{const r=await fetch(API+path,{method,signal:abort.signal,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}); const d=await r.json().catch(()=>({})); if(!r.ok) throw Error(typeof d.detail==='string'?d.detail:'提交信息有误，请检查填写内容'); return d;}catch(e){if(e.name==='AbortError')throw Error('请求超时，请刷新核对是否已保存，避免重复提交');if(e instanceof TypeError)throw Error('服务连接失败，请确认本地服务已启动后重新加载');throw e;}finally{clearTimeout(deadline);} }
@@ -552,9 +554,11 @@ async function render() {
     };
     const renderTabs=()=>{
       const box=$('#tabs');if(!box)return;
+      // 一个页签只带一个计数角标。之前把「待处理 N」也塞进页签里，它看起来像个能点的按钮，
+      // 实际是链接里的 <span>，点了只会重跳当前页签。待处理现在移进发布记录的工具条做筛选。
       box.innerHTML=`
         <a href="${pubBase}" ${pubTab==='prep'?'aria-current="page"':''}>准备发布 <span class="tabs-count">${approved.length}</span></a>
-        <a href="${pubBase}&tab=history" ${pubTab==='history'?'aria-current="page"':''}>发布记录 <span class="tabs-count">${jobs.length}</span>${jobs.filter(j=>j.status==='manual_required'||j.status==='failed').length?`<span class="tabs-count warn">待处理 ${jobs.filter(j=>j.status==='manual_required'||j.status==='failed').length}</span>`:''}</a>
+        <a href="${pubBase}&tab=history" ${pubTab==='history'?'aria-current="page"':''}>发布记录 <span class="tabs-count">${jobs.length}</span></a>
         <span class="tabs-indicator" aria-hidden="true"></span>`;
       const bar=box.querySelector('.tabs-indicator');
       if(pubTabGeo){ // 先把条摆回上一次的位置，下一帧再动到新位置，才是「滑过去」而不是「从左边缘滑入」
@@ -703,13 +707,17 @@ async function render() {
     // ---- ④ 发布记录 ----
     const renderHistory=()=>{
       const open=j=>j.status==='manual_required'||j.status==='failed';
-      const groups=[];
-      jobs.forEach(j=>{const g=groups.find(x=>x.title===j.title_snapshot);
-        g?g.items.push(j):groups.push({title:j.title_snapshot,items:[j]});});
       const nOpen=jobs.filter(open).length;
+      // 「待处理」是个真按钮：切到只看待处理，不再是个看得见点不动的角标。
+      const shown=recOnlyPending?jobs.filter(open):jobs;
+      const groups=[];
+      shown.forEach(j=>{const g=groups.find(x=>x.title===j.title_snapshot);
+        g?g.items.push(j):groups.push({title:j.title_snapshot,items:[j]});});
+      const filterBtn=nOpen?`<button type="button" id="rec-filter" aria-pressed="${recOnlyPending}">${recOnlyPending?`显示全部（${jobs.length}）`:`只看待处理（${nOpen}）`}</button>`:'';
       $('#pane').innerHTML=`<section class="pick-col" style="margin-bottom:var(--sp-6)">
         <div class="rec-head">
-          <div><h2>发布记录</h2><p>每条内容 × 平台的结果与原因，按内容分组。待处理 ${nOpen} 条。</p></div>
+          <div><h2>发布记录</h2><p>每条内容 × 平台的结果与原因，按内容分组。共 ${jobs.length} 条，待处理 ${nOpen} 条。${recOnlyPending?'（当前只显示待处理）':''}</p></div>
+          <div class="toolbar" style="margin:0">${filterBtn}</div>
         </div>
         ${groups.map(g=>`<div class="rec-group">
           <div class="rec-group-title"><strong>${esc(g.title)}</strong><span class="muted" style="font-size:var(--fs-meta)">${g.items.length} 个平台</span></div>
@@ -721,7 +729,9 @@ async function render() {
                 <small>v${j.asset_revision} · ${esc(localTime(j.updated_at))}${j.operator?' · '+esc(j.operator):''}</small></div>
               <div>${open(j)?`<button type="button" class="btn-quiet" data-receipt="${j.id}">回填链接</button>`:''}</div>
             </div>`;}).join('')}
-        </div>`).join('')||'<p class="empty-block">还没有发布记录。到「准备发布」勾选内容和平台。</p>'}</section>`;
+        </div>`).join('')||(jobs.length?'<p class="empty-block">没有待处理的发布记录。</p>':'<p class="empty-block">还没有发布记录。到「准备发布」勾选内容和平台。</p>')}</section>`;
+      const toggle=$('#rec-filter');
+      if(toggle)toggle.onclick=()=>{recOnlyPending=!recOnlyPending;renderHistory();};
       document.querySelectorAll('[data-receipt]').forEach(b=>b.onclick=()=>modal('回填发布链接',
         '<p class="muted">先去该平台完成发布，再把页面链接回填到这里。</p><label>发布链接<input name="url" type="url" required placeholder="https://"></label><label>操作人<input name="operator" required></label><label class="check"><input type="checkbox" required>确认已实际发布</label>',
         f=>api(base+'/publishing/'+b.dataset.receipt+'/receipt','POST',{...Object.fromEntries(f),confirm:true}),'保存回执'));
