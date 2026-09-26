@@ -202,17 +202,18 @@ report/    diagnosis.md  metrics.json  manual-review.md  optimization-plan.md
 
 **两类产出都不会做的事：** 不把面向写作者的话写进正文。写作任务书、「待确认」标记、「下一步」建议、本地引擎说明，全部放在**独立的「生成说明」区域**，与正文分开。
 
-配置模型（密钥只从环境变量读，不写数据库）：
+配置模型：**在界面上填就行**。打开「内容生产」页 → 点「配置内容模型」→ 选常用端点（DeepSeek / MiniMax / Moonshot / 自定义）→ 填模型名与 API Key → 先点「测试连接」确认，再保存。
 
-```bash
-GEO_CONTENT_LLM_BASE_URL=https://api.deepseek.com/v1   # 任何 OpenAI 兼容端点
-GEO_CONTENT_LLM_MODEL=deepseek-chat
-GEO_CONTENT_LLM_API_KEY=sk-...                          # 本地或免鉴权网关可留空
-```
+- 密钥存在本机 SQLite（`workspace_preferences`），接口只回是否已配置 + 掩码，**永不回显明文**；
+- 环境变量 `GEO_CONTENT_LLM_BASE_URL` / `GEO_CONTENT_LLM_MODEL` / `GEO_CONTENT_LLM_API_KEY` 优先于界面设置，方便临时覆盖；
+- 保存后立即生效，**不用重启服务**（配置在调用那一刻才读）；
+- 「测试连接」只发一句问候，不发任何素材内容。
 
 未配置时不会报错，也不会把整理稿伪称为初稿：`generation_meta_json` 记录实际使用的引擎与模型。重新生成会覆盖正文，因此必须显式确认覆盖。
 
-> **配模型后素材会发往该端点。** 上传公司内部资料前，先确认这个外发范围你能不能接受。
+> **配模型后素材会发往该端点。** 传公司内部资料前，先确认这个外发范围你能不能接受。
+
+另外，提示词里**不会出现素材的文件名或网址**——实测过一次：把文件名当素材标题送进去，模型就把「内部文档名」写进了正文。现在素材一律用「素材 1 / 素材 2」的中性编号传入，文件名只留在「来源」区。
 
 ### 质量门禁
 
@@ -231,6 +232,10 @@ GEO_CONTENT_LLM_API_KEY=sk-...                          # 本地或免鉴权网�
 
 ### 相关接口
 
+- `GET /api/content-llm`：内容模型配置状态（含掩码，不回显密钥）
+- `PUT /api/content-llm`：保存接口地址 / 模型名 / API Key（空值表示保持原值）
+- `POST /api/content-llm/check`：用一次最小调用验证连通性，不发素材
+- `DELETE /api/content-llm`：清除配置，回到本地整理模式
 - `GET /api/projects/{slug}/library`：内容库清单（含序号/字数/生成时间/素材数，不含正文）
 - `DELETE /api/projects/{slug}/content/{id}`：删除内容（连素材原件与发布记录，关联的改善任务回到待处理）
 - `GET /api/projects/{slug}/content/{id}/context`：证据包、素材列表、生成能力、质量报告、上次生成记录

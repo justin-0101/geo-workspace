@@ -12,6 +12,8 @@ import os
 import re
 from urllib import request, error
 
+import content_llm_config
+
 
 PLACEHOLDER_RE = re.compile(r'待补充|待填写|TODO|placeholder|lorem ipsum|[【\[]待核实[】\]]', re.I)
 SOURCE_RE = re.compile(r'https?://|(?:来源|出处|文件|报告|官方页面)\s*[:：]', re.I)
@@ -293,17 +295,20 @@ def quality_check(asset):
 
 
 def capability():
-    base = _text(os.environ.get('GEO_CONTENT_LLM_BASE_URL'))
-    model = _text(os.environ.get('GEO_CONTENT_LLM_MODEL'))
-    key = _text(os.environ.get('GEO_CONTENT_LLM_API_KEY'))
-    configured = bool(base and model)
+    if content_llm_config.configured():
+        values, source = content_llm_config.resolved()
+        where = '环境变量' if source.get('model') == 'env' else '本机设置'
+        return {
+            'engine': 'openai-compatible', 'configured': True,
+            'model': values['model'], 'base_url': values['base_url'],
+            'auth_configured': bool(values['api_key']), 'source': source,
+            'message': f"已配置内容模型：{values['model']}（{where}）——生成可编辑的初稿，仍需人工核对与审核",
+        }
     return {
-        'engine': 'openai-compatible' if configured else 'local-safe',
-        'configured': configured,
-        'model': model if configured else '',
-        'auth_configured': bool(key),
-        'message': ('已配置内容模型：生成可编辑的初稿（仍需人工核对与审核）' if configured else
-                    '未配置内容模型：只能生成素材整理稿（分组摘录），不能成稿；配置 GEO_CONTENT_LLM_BASE_URL 与 GEO_CONTENT_LLM_MODEL 后可生成初稿'),
+        'engine': 'local-safe', 'configured': False, 'model': '', 'base_url': '',
+        'auth_configured': False, 'source': {},
+        'message': ('未配置内容模型：只能整理素材（按模块分组的摘录），不能成稿；'
+                    '在「内容生产」页点「配置内容模型」填入 DeepSeek 等 OpenAI 兼容端点即可生成初稿'),
     }
 
 
@@ -515,11 +520,10 @@ def _extract_json(text):
 
 
 def openai_generate(asset, bundle):
-    base = _text(os.environ.get('GEO_CONTENT_LLM_BASE_URL'))
-    model = _text(os.environ.get('GEO_CONTENT_LLM_MODEL'))
-    key = _text(os.environ.get('GEO_CONTENT_LLM_API_KEY'))
+    values, _ = content_llm_config.resolved()
+    base, model, key = values['base_url'], values['model'], values['api_key']
     if not base or not model:
-        raise ValueError('内容模型未配置')
+        raise ValueError('内容模型未配置（在「内容生产」页点「配置内容模型」）')
     brief = {
         'current_title': _text(asset.get('title')),
         'channel': _text(asset.get('channel')),
@@ -528,7 +532,8 @@ def openai_generate(asset, bundle):
         'tone': _text(asset.get('tone')),
         'keywords': _text(asset.get('keywords')),
         'target_length': int(asset.get('target_length') or 1200),
-        'verified_facts': _text(asset.get('facts')),
+        # 故意不传 facts：它现在完全由素材推导，已经包含在下面；
+        # 而且里面带文件名，传进去会被写进正文。
     }
     system = (
         '你是企业内容编辑，为『{channel}』写一篇可发布的中文文章。'
@@ -541,9 +546,18 @@ def openai_generate(asset, bundle):
         '结构要求：开头一段直接进入主题（禁止“本文将介绍…”“本文的目标是…”这类套话）；'
         '正文用 Markdown 二级标题组织，功能/模块类内容可以带三级标题和列表；结尾给可执行的下一步。'
         '文风：具体、克制、自然，避免“赋能/闭环/降维打击/领先/专业”这类词。'
+        '不得在正文里出现素材文件名、内部文档名或“素材1”这类标记，它们只是输入标识。'
         '返回严格 JSON，字段仅含 title、summary、body；body 内不要再出现一级标题。'
     ).replace('{channel}', _text(asset.get('channel')) or '通用渠道')
-    material_text = _text(bundle.get('materials_text'))
+    # 素材块用中性编号，不把文件名/网址送进提示词：模型会把它写进正文。
+    kind_label = {'file': '附件', 'url': '网页', 'note': '粘贴文本'}
+    blocks = []
+    for index, item in enumerate(bundle.get('materials') or [], 1):
+        excerpt = _text(item.get('excerpt'))
+        if not excerpt:
+            continue
+        blocks.append(f"【素材{index}（{kind_label.get(item.get('kind'), '素材')}）】\n{excerpt}")
+    material_text = '\n\n'.join(blocks) or _text(bundle.get('materials_text'))
     if len(material_text) > 16000:
         material_text = material_text[:16000]
     overview = material_overview(bundle.get('materials'))

@@ -85,6 +85,26 @@ function modal(title, body, submit, button='确定', cancel='取消') {
  $('#modal-form').onsubmit=async e=>{e.preventDefault(); const b=$('#confirm-modal');b.disabled=true;try{const result=await submit(new FormData(e.target));d.close();await render();if(result&&result.message)notice(result.message);}catch(err){$('#modal-error').textContent=err.message;}finally{b.disabled=false;}}; d.showModal();
 }
 $('#close-modal').onclick=$('#cancel-modal').onclick=()=>$('#modal').close();
+
+// 内容生成模型配置（DeepSeek 等 OpenAI 兼容端点）。密钥只存在本机数据库，不回显明文。
+async function openContentLlm(){
+ let st={};
+ try{st=await api('/api/content-llm');}catch(e){notice(e.message);return;}
+ const presets=st.presets||[];
+ const keyHint=(st.api_key&&st.api_key.configured)?`已配置 ${st.api_key.masked}，留空表示不改`:'粘贴你的 API Key';
+ modal('配置内容生成模型',
+  `<p class="muted">${esc(st.note||'')}</p>
+   <label>常用端点<select id="llm-preset">${presets.map(p=>`<option value="${esc(p.base_url)}|${esc(p.model)}">${esc(p.label)}</option>`).join('')}</select></label>
+   <label>接口地址<input name="base_url" required maxlength="500" value="${esc(st.base_url||'')}" placeholder="https://api.deepseek.com/v1"></label>
+   <label>模型名<input name="model" required maxlength="200" value="${esc(st.model||'')}" placeholder="deepseek-chat"></label>
+   <label>API Key<input name="api_key" type="password" maxlength="500" placeholder="${esc(keyHint)}"></label>
+   <div class="toolbar" style="margin:0"><button type="button" id="llm-test">测试连接</button><button type="button" class="btn-quiet" id="llm-clear">清除配置</button><span class="muted" id="llm-test-msg"></span></div>`,
+  async data=>{const out=await api('/api/content-llm','PUT',Object.fromEntries(data));return {message:out.configured?`已保存内容模型：${out.model}`:'已保存，但还缺接口地址或模型名'};},
+  '保存');
+ $('#llm-preset').onchange=e=>{const [b,m]=String(e.target.value||'').split('|');if(b){$('#modal [name="base_url"]').value=b;$('#modal [name="model"]').value=m;}};
+ $('#llm-test').onclick=async()=>{const el=$('#llm-test-msg');el.textContent='正在测试（只发一句问候，不发素材）…';try{const f=new FormData($('#modal-form'));const out=await api('/api/content-llm/check','POST',{base_url:f.get('base_url'),model:f.get('model'),api_key:f.get('api_key')});el.textContent='✓ '+out.message;}catch(err){el.textContent='✕ '+err.message;}};
+ $('#llm-clear').onclick=async()=>{try{await api('/api/content-llm','DELETE');$('#modal').close();await render();notice('已清除内容模型配置，回到本地整理模式');}catch(err){notice(err.message);}};
+}
 function createProject() { modal('创建项目','<label>项目名称<input name="name" required maxlength="200" autofocus></label><label>主体类型<select name="target_type"><option value="enterprise">企业</option><option value="product">产品</option><option value="person">个人</option><option value="case">案例</option></select></label>',async data=>{const r=await api('/api/projects','POST',Object.fromEntries(data));location.hash=link('projects',r.slug,'profile');},'创建'); }
 async function render() {
  clearTimeout(timer);const token=++epoch; const {view,params}=route();notice('');
@@ -278,7 +298,7 @@ async function render() {
        <ul class="source-list" id="src-list"></ul>
        <p class="muted">生成时会把这里的内容读进来，提取可引用的企业介绍与事实，并自动写进稿件的「来源」。素材不等于已确认事实，审核前仍需核对口径与时效。图片与无文字层的扫描件会自动 OCR（本机识别，约 8 秒/页）。</p>
       </section>
-      <div class="toolbar"><button class="primary" id="save-brief">保存任务书</button><button type="button" id="generate" class="primary">${ctx.generator.configured?(generated?'重新生成初稿':'生成初稿'):(generated?'重新整理素材':'整理素材')}</button><span class="muted">${esc(ctx.generator.message)}${meta.generated_at?' · 上次生成 '+esc(localTime(meta.generated_at)):''}</span></div>
+      <div class="toolbar"><button class="primary" id="save-brief">保存任务书</button><button type="button" id="generate" class="primary">${ctx.generator.configured?(generated?'重新生成初稿':'生成初稿'):(generated?'重新整理素材':'整理素材')}</button><button type="button" id="cfg-llm">配置内容模型</button><span class="muted">${esc(ctx.generator.message)}${meta.generated_at?' · 上次生成 '+esc(localTime(meta.generated_at)):''}</span></div>
       ${generated
         ?`<p class="muted">本稿已生成：约 ${q.plain_length||0} 字，自动质量检查${q.passed?'通过':'未通过'}。正文、来源与审核都在<a href="${link('library',chosen.slug)+'&asset='+asset.id}">内容库</a>处理。</p>`
         :'<p class="muted">点「生成初稿」后，稿件会进入「内容库」，在那里查看、编辑和审核。</p>'}
@@ -330,6 +350,7 @@ async function render() {
      $('#src-add-url').onclick=addUrl;
      $('#src-url').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();addUrl();}};
      $('#src-paste').onclick=()=>modal('粘贴文本素材','<label>名称<input name="label" required maxlength="200" placeholder="例如：销售口述的产品要点"></label><label>内容<textarea name="text" rows="8" required placeholder="把已确认的介绍、参数或案例粘进来"></textarea></label>',async d=>{await api(base+'/content/'+asset.id+'/sources/note','POST',{label:d.get('label'),text:d.get('text')});},'保存素材');
+     $('#cfg-llm').onclick=()=>openContentLlm();
     }else{
      const todo=items.filter(x=>/（待补充/.test(x.body||''));
      $('#module').innerHTML=`<div class="toolbar"><button id="direct" class="primary">＋ 新建内容任务书</button><a class="button" href="${link('library',chosen.slug)}">去内容库看已生成的初稿</a><span class="muted">确认任务书与素材后生成初稿。</span></div>

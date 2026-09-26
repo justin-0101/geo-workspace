@@ -1,10 +1,13 @@
 """Unit tests for the evidence-aware generation layer and its quality gate."""
 import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import content_generation as generation
+import workspace_store as store
 
 
 ASSET = {
@@ -62,7 +65,26 @@ RICH_BUNDLE = dict(BUNDLE,
                    materials_text='产品说明原文')
 
 
-class QualityGateTests(unittest.TestCase):
+class IsolatedStore(unittest.TestCase):
+    """把 store 指向临时库。
+
+    必须隔离：内容模型配置现在存在本机数据库里，不隔离就会读到真实设置，
+    使测试随用户配置变红或变绿。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='geo-gen-test-')
+        self.old = store.DATA, store.DB
+        store.DATA = Path(self.tmp.name)
+        store.DB = store.DATA / 'test.db'
+        store.migrate()
+
+    def tearDown(self):
+        store.DATA, store.DB = self.old
+        self.tmp.cleanup()
+
+
+class QualityGateTests(IsolatedStore):
     def test_placeholder_title_and_instruction_title_are_blocked(self):
         for title in ('待填写：补充问题相关的事实与内容：预算怎么核对？',
                       '待补充：选型指南',
@@ -103,7 +125,7 @@ class QualityGateTests(unittest.TestCase):
         self.assertEqual(generation.quality_check(dict(ASSET, body=body))['plain_length'], len('标题链接正文内容'))
 
 
-class LocalGeneratorTests(unittest.TestCase):
+class LocalGeneratorTests(IsolatedStore):
     def test_local_draft_uses_report_title_and_passes_the_gate(self):
         result = generation.local_generate(ASSET, RICH_BUNDLE)
         self.assertEqual(result['title'], RICH_BUNDLE['suggested_title'])
@@ -188,7 +210,7 @@ class LocalGeneratorTests(unittest.TestCase):
         self.assertIn('制造型企业', result['body'])
 
 
-class RemoteGeneratorTests(unittest.TestCase):
+class RemoteGeneratorTests(IsolatedStore):
     def test_capability_reports_local_engine_without_configuration(self):
         restore = _with_env({'GEO_CONTENT_LLM_BASE_URL': None, 'GEO_CONTENT_LLM_MODEL': None,
                              'GEO_CONTENT_LLM_API_KEY': None})
@@ -197,7 +219,7 @@ class RemoteGeneratorTests(unittest.TestCase):
             self.assertFalse(status['configured'])
             self.assertEqual(status['engine'], 'local-safe')
             # 说清楚它能做什么、不能做什么
-            self.assertIn('素材整理稿', status['message'])
+            self.assertIn('只能整理素材', status['message'])
             self.assertIn('不能成稿', status['message'])
         finally:
             restore()

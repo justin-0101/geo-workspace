@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 import workspace_store as store
 import browser_engine as engine
 import editorial_flow as editorial
+import content_llm_config
 import source_materials as materials
 import publish_adapters as adapters
 import platform_login
@@ -271,6 +272,36 @@ def asset_create(slug: str,identity: str): return editorial.create_asset(slug,id
 @app.post('/api/projects/{slug}/content', status_code=201)
 def asset_create_manual(slug: str, payload: ManualContentInput):
     return editorial.create_manual_asset(slug, payload.title, payload.brief, payload.channel)
+
+
+@app.get('/api/content-llm')
+def content_llm_status():
+    """内容生成模型的配置状态（不回显密钥）。"""
+    return content_llm_config.status()
+
+
+class ContentLlmInput(BaseModel):
+    base_url: str = Field(default='', max_length=500)
+    model: str = Field(default='', max_length=200)
+    api_key: str = Field(default='', max_length=500)
+
+
+@app.put('/api/content-llm')
+def content_llm_save(payload: ContentLlmInput):
+    content_llm_config.save(payload.model_dump())
+    return content_llm_config.status()
+
+
+@app.delete('/api/content-llm')
+def content_llm_clear():
+    content_llm_config.clear()
+    return content_llm_config.status()
+
+
+@app.post('/api/content-llm/check')
+def content_llm_check(payload: ContentLlmInput | None = None):
+    """用一次最小调用验证地址/模型/密钥；不发送任何素材内容。"""
+    return content_llm_config.check(payload.model_dump() if payload else None)
 
 
 @app.get('/api/projects/{slug}/library')
