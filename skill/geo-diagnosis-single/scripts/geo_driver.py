@@ -8,10 +8,11 @@ GEO one-shot browser driver（通用稳定单批版）
   python geo_driver.py preflight <run_dir> <platform_id|all>
 环境变量:
   GEO_CHROME_PATH        Chrome 可执行文件路径
-  GEO_BROWSER_USER_DATA  浏览器 user-data-dir，默认 E:\\geo-profile\\UserData
+  GEO_BROWSER_USER_DATA  浏览器 user-data-dir，默认位于 GEO_REDESIGN_DATA\\browser-profile
   GEO_CDP_PORT           CDP 端口，默认 9333
 """
-import sys, os, json, time, subprocess, re, glob
+import sys, os, json, time, subprocess, re, glob, shutil
+from pathlib import Path
 from urllib.request import urlopen
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -19,9 +20,33 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 CDP_PORT = int(os.environ.get("GEO_CDP_PORT", "9333"))
-CHROME = os.environ.get("GEO_CHROME_PATH", r"C:\Program Files\Google\Chrome\Application\chrome.exe")
-# 副本 profile（Chrome 禁止在默认数据目录上开调试，用 E 盘副本）；稳定单批版默认共用一个 profile，因此禁止并发。
-USER_DATA = os.environ.get("GEO_BROWSER_USER_DATA", r"E:\geo-profile\UserData")
+
+
+def _chrome_path():
+    configured = os.environ.get("GEO_CHROME_PATH", "").strip()
+    if configured:
+        return configured
+    candidates = []
+    if os.name == "nt":
+        for name in ("PROGRAMFILES", "ProgramW6432", "PROGRAMFILES(X86)"):
+            base = os.environ.get(name)
+            if base:
+                candidates.append(Path(base) / "Google/Chrome/Application/chrome.exe")
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            candidates.append(Path(local) / "Google/Chrome/Application/chrome.exe")
+    for name in ("chrome", "google-chrome", "chromium", "chromium-browser"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+    return next((str(path) for path in candidates if path.is_file()), "")
+
+
+CHROME = _chrome_path()
+# Profile defaults below are relative to the checkout/current working directory;
+# the application always supplies GEO_BROWSER_USER_DATA under its configured data root.
+DATA_ROOT = Path(os.environ.get("GEO_REDESIGN_DATA", str(Path.cwd() / "data")))
+USER_DATA = os.environ.get("GEO_BROWSER_USER_DATA", str(DATA_ROOT / "browser-profile"))
 PROFILE_DIR = os.environ.get("GEO_BROWSER_PROFILE_DIR", "Default")
 
 PLATFORMS = {

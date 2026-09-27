@@ -11,6 +11,7 @@ import tempfile
 import time
 import urllib.request
 from playwright.sync_api import sync_playwright, expect
+from browser_paths import chrome_executable
 
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'test-results'
@@ -34,7 +35,10 @@ def main():
                         urllib.request.urlopen(f'http://127.0.0.1:{apiport}/api/projects',timeout=1);break
                     except Exception:time.sleep(.1)
                 with sync_playwright() as pw:
-                    browser=pw.chromium.launch(executable_path=r'C:\Program Files\Google\Chrome\Application\chrome.exe',headless=True)
+                    executable = chrome_executable()
+                    if executable is None:
+                        raise RuntimeError('Chrome/Chromium not found; set GEO_CHROME_PATH')
+                    browser=pw.chromium.launch(executable_path=str(executable),headless=True)
                     context=browser.new_context(viewport={'width':1440,'height':1000})
                     # Actual API calls, rerouted only to the isolated server, never production.
                     def forward(route):

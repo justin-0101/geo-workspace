@@ -328,7 +328,7 @@ class EditorialTests(APITests):
         client.get.return_value=MagicMock(json=lambda:{'access_token':'tok','expires_in':7200})
         client.post.return_value=MagicMock(json=lambda:{'media_id':'MEDIA123'})
         api=wechat_mp.WechatMpClient('wxappid','secret',client=client)
-        out=api.add_draft(title='标题',content='## 小节\n正文')
+        out=api.add_draft(title='标题',content='## 小节\n正文',thumb_media_id='THUMB1')
         self.assertEqual(out['media_id'],'MEDIA123')
         args,kwargs=client.post.call_args
         self.assertIn('/cgi-bin/draft/add',args[0])
@@ -336,6 +336,50 @@ class EditorialTests(APITests):
         payload=json.loads(kwargs['content'].decode('utf8'))
         self.assertEqual(payload['articles'][0]['title'],'标题')
         self.assertIn('<h2>小节</h2>',payload['articles'][0]['content'])
+        self.assertEqual(payload['articles'][0]['thumb_media_id'],'THUMB1')
+        self.assertEqual(payload['articles'][0]['article_type'],'news')
+
+    def test_wechat_draft_requires_cover(self):
+        """图文消息没封面时必须在本地拦下，不能换个看不懂的 40007 回来。"""
+        import wechat_mp
+        from unittest.mock import MagicMock
+        client=MagicMock()
+        client.get.return_value=MagicMock(json=lambda:{'access_token':'tok','expires_in':7200})
+        api=wechat_mp.WechatMpClient('wxappid','secret',client=client)
+        with self.assertRaises(wechat_mp.WechatError) as ctx:
+            api.add_draft(title='标题',content='正文')
+        self.assertIn('封面',str(ctx.exception))
+        client.post.assert_not_called()
+
+    def test_wechat_thumb_upload_uses_permanent_material(self):
+        """封面必须进永久素材库：临时素材 3 天过期，拿它当封面就是 40007。"""
+        import wechat_mp
+        from unittest.mock import MagicMock
+        client=MagicMock()
+        client.get.return_value=MagicMock(json=lambda:{'access_token':'tok','expires_in':7200})
+        client.post.return_value=MagicMock(json=lambda:{'media_id':'THUMB9'})
+        api=wechat_mp.WechatMpClient('wxappid','secret',client=client)
+        self.assertEqual(api.upload_thumb('cover.jpg',b'jpegbytes'),'THUMB9')
+        args,kwargs=client.post.call_args
+        self.assertIn('/cgi-bin/material/add_material',args[0])
+        self.assertNotIn('/cgi-bin/media/upload',args[0])
+        self.assertEqual(kwargs['params']['type'],wechat_mp.THUMB_MATERIAL_TYPE)
+        self.assertIn('media',kwargs['files'])
+
+    def test_wechat_errors_keep_wechat_wording(self):
+        """本地提示是猜的，微信原文才是证据——两者都要留在报错里。"""
+        import wechat_mp
+        from unittest.mock import MagicMock
+        client=MagicMock()
+        client.get.return_value=MagicMock(json=lambda:{'access_token':'tok','expires_in':7200})
+        client.post.return_value=MagicMock(json=lambda:{'errcode':40007,'errmsg':'invalid media_id'})
+        api=wechat_mp.WechatMpClient('wxappid','secret',client=client)
+        with self.assertRaises(wechat_mp.WechatError) as ctx:
+            api.add_draft(title='标题',content='正文',thumb_media_id='X')
+        message=str(ctx.exception)
+        self.assertIn('errcode 40007',message)
+        self.assertIn('invalid media_id',message)
+        self.assertNotIn('serrcode',message)
 
     def test_wechat_errors_are_actionable_and_secret_free(self):
         import wechat_mp
@@ -345,7 +389,8 @@ class EditorialTests(APITests):
         client.post.return_value=MagicMock(json=lambda:{'errcode':40164,'errmsg':'invalid ip'})
         api=wechat_mp.WechatMpClient('wxappid','topsecret',client=client)
         with self.assertRaises(wechat_mp.WechatError) as ctx:
-            api.add_draft(title='标题',content='正文')
+            # 必须带封面才能走到微信这一层：没封面会被本地提前拦下
+            api.add_draft(title='标题',content='正文',thumb_media_id='THUMB1')
         message=str(ctx.exception)
         self.assertIn('IP 白名单',message)
         self.assertNotIn('topsecret',message)

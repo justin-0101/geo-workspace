@@ -135,10 +135,10 @@ python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\render-repo
 python "$env:USERPROFILE\.agents\skills\geo-diagnosis-single\scripts\open_login.py" deepseek doubao qianwen metaso
 ```
 
-默认浏览器 profile：`E:\geo-profile\UserData`。如需切换：
+默认浏览器 profile 位于应用配置的数据目录下（`GEO_REDESIGN_DATA\browser-profile`）。如需切换到已批准的数据目录：
 
 ```powershell
-$env:GEO_BROWSER_USER_DATA = 'E:\geo-profiles\company-a\UserData'
+$env:GEO_BROWSER_USER_DATA = "$env:GEO_REDESIGN_DATA\browser-profile"
 ```
 
 稳定单批版默认共用单 profile，不支持同 profile 并发。

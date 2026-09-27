@@ -13,6 +13,7 @@ import time
 import workspace_store as store
 from diagnosis_runs import verify_frozen_run, get_run
 from process_guard import ProcessGuard
+from browser_paths import chrome_executable
 
 def _default_scripts():
     """引擎脚本位置：优先本仓库内的 skill/geo-diagnosis-single/scripts，
@@ -36,6 +37,9 @@ def environment():
     env.update(GEO_BROWSER_USER_DATA=str(store.DATA/'browser-profile'),
                GEO_BROWSER_PROFILE_DIR='Default', GEO_CDP_PORT='9348', PYTHONIOENCODING='utf-8',
                GEO_REDESIGN_ENGINE=str(SCRIPTS), GEO_REDESIGN_DATA=str(store.DATA))
+    chrome = chrome_executable()
+    if chrome:
+        env['GEO_CHROME_PATH'] = str(chrome)
     return env
 
 
@@ -44,8 +48,8 @@ def dependencies():
     for f in ['geo_driver.py','geo_run.py','render-report.py','validate-run.ps1','update-task-state.ps1']:
         if not (SCRIPTS/f).is_file(): missing.append(f)
     if importlib.util.find_spec('playwright') is None: missing.append('Playwright Python')
-    chrome = Path(os.environ.get('GEO_CHROME_PATH', r'C:\Program Files\Google\Chrome\Application\chrome.exe'))
-    if not chrome.is_file(): missing.append('Chrome')
+    if chrome_executable() is None:
+        missing.append('Chrome (set GEO_CHROME_PATH or install Chrome/Chromium)')
     return missing
 
 

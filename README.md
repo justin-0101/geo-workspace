@@ -27,6 +27,8 @@
 ```
 geo-platform-redesign-v1/            # 本仓库根目录 = 平台本体
 ├─ start.py / serve.py               # 启动器（拉起就返回 / 前台常驻）
+├─ runtime_config.py                 # 环境变量、回环地址与端口契约
+├─ process_identity.py               # 停止服务前的 PID 身份校验
 ├─ frontend_server.py                # 4173 前端白名单服务
 ├─ workflow_api.py                   # 8798 FastAPI（项目/资料/冻结/执行/内容/发布）
 ├─ workspace_store.py                # SQLite 存储与增量迁移
@@ -37,6 +39,7 @@ geo-platform-redesign-v1/            # 本仓库根目录 = 平台本体
 ├─ content_generation.py             # 生成引擎（本地安全稿 / OpenAI 兼容）与内容质量门禁
 ├─ source_materials.py               # 素材：附件解析（pdf/docx/xlsx/html）、网址抓取、OCR、粘贴文本
 ├─ publish_adapters.py / wechat_mp.py / browser_publisher.py / platform_login.py
+├─ cover_gen.py                      # 公众号封面生成（发布运行时必需）
 ├─ workspace.html / workspace.css / workspace.js    # 统一前端框架
 └─ skill/geo-diagnosis-single/       # 诊断引擎（也可作为独立 agent skill 使用）
     ├─ SKILL.md                      # 引擎入口文档
@@ -57,11 +60,15 @@ geo-platform-redesign-v1/            # 本仓库根目录 = 平台本体
 - **Windows**：浏览器自动化与两个校验脚本（`validate-run.ps1`、`update-task-state.ps1`）按 Windows 写；换 Linux/macOS 需要自行改写这两处。
 - **Python 3.11+**（已在 3.11 验证）。
 - **Google Chrome**：默认取 `C:\Program Files\Google\Chrome\Application\chrome.exe`，可用 `GEO_CHROME_PATH` 覆盖。引擎直接驱动系统 Chrome，**不需要** `playwright install`。
-- **依赖**：
+- **依赖**：在仓库根目录创建虚拟环境，并按发布清单安装全部运行时依赖（不要只安装几项基础包）：
 
-```bash
-pip install fastapi uvicorn playwright httpx pydantic
+```powershell
+py -3.11 -m venv .venv
+.venv\\Scripts\\python.exe -m pip install -r requirements.txt
+.venv\\Scripts\\python.exe check_install.py --skip-chrome
 ```
+
+也可以直接运行 `install.ps1`；它会创建 `.venv`、安装 `requirements.txt` 并执行安装预检。
 
 ### 启动
 
@@ -73,6 +80,7 @@ python serve.py            # 前台常驻（Ctrl+C = 前端与 API 一起停）
 
 - 前端 http://127.0.0.1:4173/ ，API 127.0.0.1:8798。
 - `start.py` 与 `serve.py` **不要同时用**：端口被占时前端会拒绝启动。
+- 仅支持 IPv4 回环 `127.0.0.1`/`localhost`；`::1` 会被明确拒绝。前端与 API 端口必须不同。
 - 等价的手工方式：`python -m uvicorn workflow_api:app --host 127.0.0.1 --port 8798` + `python frontend_server.py`。
 
 ### 环境变量
@@ -81,6 +89,8 @@ python serve.py            # 前台常驻（Ctrl+C = 前端与 API 一起停）
 |---|---|---|
 | `GEO_REDESIGN_DATA` | 数据目录（SQLite、runs、浏览器 profile、日志） | `./data` |
 | `GEO_REDESIGN_ENGINE` | 诊断引擎脚本目录 | 仓库内 `skill/geo-diagnosis-single/scripts` |
+| `GEO_BIND_HOST` | 绑定地址（仅 IPv4 回环） | `127.0.0.1` |
+| `GEO_FRONTEND_PORT` / `GEO_API_PORT` | 前端 / API 端口（必须不同） | `4173` / `8798` |
 | `GEO_CHROME_PATH` | Chrome 可执行文件 | `C:\Program Files\Google\Chrome\Application\chrome.exe` |
 | `GEO_BROWSER_USER_DATA` / `GEO_BROWSER_PROFILE_DIR` / `GEO_CDP_PORT` | 隔离浏览器 profile 与调试端口 | 平台自动设为 `data/browser-profile` / `Default` / `9348` |
 | `GEO_MIN_ANSWER_CHARS` | 回答区达到多少字符才算有效（引擎） | `400` |
@@ -89,7 +99,7 @@ python serve.py            # 前台常驻（Ctrl+C = 前端与 API 一起停）
 
 ### 为什么必须用白名单服务
 
-`frontend_server.py` 只提供 `workspace.html/css/js`，其余旧入口重定向到统一框架；`data/`、`backups/`、脚本与测试均不可下载；启动前还会检测 4173 是否已被占用。
+`frontend_server.py` 只提供 `workspace.html/css/js`、`geo-config.js` 与 `fonts/` 下字体，其他旧入口重定向到统一框架；`data/`、`backups/`、脚本与测试均不可下载；启动前还会检测前端端口是否已被占用。发布包还必须包含 `cover_gen.py`、`process_identity.py`、`runtime_config.py` 与完整 `skill/geo-diagnosis-single/` 子树；不要只导出 HTML 原型文件。
 
 **不要用 `python -m http.server` 暴露本仓库目录。** 本项目真实发生过一次：一个残留的 `python -m http.server` 与白名单服务同时监听（前者监听 `0.0.0.0`），导致 `data/redesign.db` 能被局域网直接下载。该进程已终止，并加了「启动前检测端口占用」的保护。
 
@@ -308,11 +318,12 @@ report/    diagnosis.md  metrics.json  manual-review.md  optimization-plan.md
 ## 测试
 
 ```bash
-# 平台：存储、API、编辑流程、内容生成与质量门禁、素材解析与抓取、引擎门禁、
-#       文案体检、平台登录、端口探测
+# 平台：存储、API、编辑流程、内容生成与质量门禁、公众号封面、素材解析与抓取、
+#       引擎门禁、文案体检、平台登录、端口探测
 python -m unittest test_workspace_core test_workflow_api test_editorial_flow \
-                   test_content_generation test_source_materials test_engine_gates \
-                   test_report_text_check test_platform_login test_port_probe
+                   test_content_generation test_cover_gen test_source_materials \
+                   test_engine_gates test_report_text_check test_platform_login test_port_probe \
+                   test_deployment test_frontend_server test_start_stop
 
 # 浏览器流程（会起临时前端/API 与临时浏览器，不向外部平台发送任何问题）
 python test_browser_flow.py

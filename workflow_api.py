@@ -18,6 +18,7 @@ import platform_login
 from diagnosis_config import DIAGNOSIS_PLATFORMS, PUBLISH_PLATFORMS, suggest_questions
 from diagnosis_runs import create_frozen_run, verify_frozen_run
 from process_guard import ProcessGuard
+from runtime_config import FRONTEND_ORIGINS
 
 
 @asynccontextmanager
@@ -36,7 +37,13 @@ async def lifespan(app):
         guard.release()
 
 app = FastAPI(title='GEO 工作空间', lifespan=lifespan)
-app.add_middleware(CORSMiddleware,allow_origins=['http://127.0.0.1:4173','http://localhost:4173'],allow_methods=['GET','POST','PUT','DELETE'],allow_headers=['Content-Type'])
+app.add_middleware(CORSMiddleware,allow_origins=FRONTEND_ORIGINS,allow_methods=['GET','POST','PUT','DELETE'],allow_headers=['Content-Type'])
+
+@app.middleware('http')
+async def identify_local_api(request, call_next):
+    response = await call_next(request)
+    response.headers['X-GEO-Service'] = 'api'
+    return response
 
 @app.exception_handler(ValueError)
 async def bad_request(request,exc): return JSONResponse(status_code=409,content={'detail':str(exc)})

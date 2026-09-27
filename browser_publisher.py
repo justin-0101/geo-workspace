@@ -10,8 +10,7 @@ from pathlib import Path
 
 import workspace_store as store
 from process_guard import ProcessGuard
-
-CHROME = os.environ.get('GEO_CHROME_PATH', r'C:\Program Files\Google\Chrome\Application\chrome.exe')
+from browser_paths import chrome_executable
 
 # 各平台的编辑器入口与候选选择器；候选是“尽力而为”，定位不到就转人工并留截图。
 TARGETS = {
@@ -118,8 +117,9 @@ def publish(platform_id, title, body, evidence_dir, operator='', timeout_ms=9000
         from playwright.sync_api import sync_playwright
         profile = str(store.DATA / 'browser-profile')
         with sync_playwright() as pw:
+            executable = chrome_executable()
             context = pw.chromium.launch_persistent_context(
-                user_data_dir=profile, executable_path=CHROME, headless=False, viewport=None,
+                user_data_dir=profile, executable_path=str(executable) if executable else None, headless=False, viewport=None,
                 args=['--profile-directory=Default', '--start-maximized',
                       '--no-first-run', '--no-default-browser-check'])
             try:

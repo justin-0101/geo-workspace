@@ -3,16 +3,19 @@
 只用官方服务端接口（不模拟登录、不导出 Cookie）：
 - GET  /cgi-bin/token              获取 access_token
 - POST /cgi-bin/draft/add          新增草稿（草稿箱）
-- POST /cgi-bin/material/add_material  上传永久图片素材（封面用，可选）
+- POST /cgi-bin/material/add_material  上传永久素材（封面必填，正文图片可选）
 
 文档：https://developers.weixin.qq.com/doc/subscription/api/draftbox/draftmanage/api_draft_add
 
 注意：
 - AppSecret 只从本机凭据存储读取，异常信息中不会带出密钥；
 - 官方要求调用来源 IP 在公众号后台的 IP 白名单内；
+- 图文消息（article_type=news）的封面 thumb_media_id 为必填；缺封面时
+  微信只回 40007 invalid media_id，看不懂，所以本模块提前拦截；
 - 新建草稿成功后内容是“草稿箱里的草稿”，还需要在公众号后台群发，因此不算已发布上线。
 """
 import json
+import os
 import time
 import html as html_lib
 
@@ -20,6 +23,13 @@ import httpx
 
 API_BASE = 'https://api.weixin.qq.com'
 TOKEN_ERROR_CODES = {40001, 40014, 42001}      # access_token 失效，需要重取
+
+#: 上传封面用哪种永久素材 type。
+#: 官方文档把封面写成 thumb（缩略图），但缩略图素材**限制 64KB**，
+#: 1080x864 的封面压到 64KB 以下会明显糊；图片素材上限 10MB，
+#: 而本机另一条已验证可用的发布链路（python-wechat-publish）用的就是 image。
+#: 需要切回缩略图时设 GEO_WECHAT_THUMB_TYPE=thumb。
+THUMB_MATERIAL_TYPE = os.environ.get('GEO_WECHAT_THUMB_TYPE', 'image') or 'image'
 
 ERROR_HINTS = {
     40001: 'access_token 无效，已自动重试；若持续失败请重新保存 AppSecret。',
@@ -36,8 +46,16 @@ ERROR_HINTS = {
 class WechatError(RuntimeError):
     def __init__(self, errcode, errmsg=''):
         self.errcode = errcode
-        self.errmsg = errmsg
-        super().__init__(f'serrcode {errcode}：{ERROR_HINTS.get(errcode, errmsg or "未知错误")}')
+        self.errmsg = errmsg or ''
+        hint = ERROR_HINTS.get(errcode)
+        if not errcode:
+            text = self.errmsg or '未知错误'
+        elif hint and self.errmsg and self.errmsg != hint:
+            # 把微信原文一并带出来：本地提示是猜的，原文才是证据
+            text = f'errcode {errcode}：{hint}（微信原文：{self.errmsg}）'
+        else:
+            text = f'errcode {errcode}：{hint or self.errmsg or "未知错误"}'
+        super().__init__(text)
 
 
 def markdown_to_html(text):
@@ -102,18 +120,26 @@ class WechatMpClient:
         self.access_token(force=True)
         return {'ok': True, 'message': '凭据可用，access_token 获取成功'}
 
-    def add_draft(self, title, content, digest='', author='', thumb_media_id='', source_url=''):
+    def add_draft(self, title, content, digest='', author='', thumb_media_id='',
+                  source_url='', article_type='news'):
         title = (title or '').strip()
         if not title:
             raise WechatError(0, '标题为空')
         if len(title) > 64:
             title = title[:64]
+        thumb_media_id = (thumb_media_id or '').strip()
+        # 图文消息（news）的封面必填。漏传时微信只回一个看不懂的
+        # 40007 invalid media_id，所以在这里就说清楚，别把空白请求打到微信。
+        if article_type == 'news' and not thumb_media_id:
+            raise WechatError(0, '缺少封面素材 thumb_media_id：article_type=news 必须提供永久素材封面，'
+                                 '请先生成或指定封面图再写草稿')
         article = {
             'title': title,
             'author': (author or '')[:8],
             'digest': (digest or '')[:120],
             'content': markdown_to_html(content) if '<' not in str(content or '') else str(content),
             'content_source_url': source_url or '',
+            'article_type': article_type,
             'need_open_comment': 0,
             'only_fans_can_comment': 0,
         }
@@ -134,13 +160,25 @@ class WechatMpClient:
                 raise
         raise last_error
 
-    def upload_image(self, filename, content_bytes):
-        """上传永久图片素材，返回 media_id（封面用）。"""
+    def upload_material(self, filename, content_bytes, material_type):
+        """上传永久素材，返回 media_id。"""
         token = self.access_token()
         files = {'media': (filename, content_bytes)}
         response = self._client.post(API_BASE + '/cgi-bin/material/add_material',
-                                     params={'access_token': token, 'type': 'image'}, files=files)
+                                     params={'access_token': token, 'type': material_type}, files=files)
         data = response.json()
         if data.get('errcode'):
             raise WechatError(data['errcode'], data.get('errmsg', ''))
         return data.get('media_id', '')
+
+    def upload_thumb(self, filename, content_bytes):
+        """上传封面，返回 thumb_media_id。
+
+        必须是**永久**素材：临时素材（/cgi-bin/media/upload）3 天就过期，
+        拿它当 thumb_media_id 就是 40007 的经典成因。
+        """
+        return self.upload_material(filename, content_bytes, THUMB_MATERIAL_TYPE)
+
+    def upload_image(self, filename, content_bytes):
+        """上传正文图片永久素材，返回 media_id。"""
+        return self.upload_material(filename, content_bytes, 'image')

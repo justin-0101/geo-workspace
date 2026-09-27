@@ -8,6 +8,7 @@ import os
 import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+from browser_paths import chrome_executable
 
 # 默认打真实运行中的实例；跑临时实例验收时用环境变量覆盖（端口与截图目录）。
 API = os.environ.get('GEO_LIVE_API') or 'http://127.0.0.1:8798'
@@ -26,8 +27,10 @@ def main():
     checks, errors = [], []
     projects = api('/api/projects')['projects']
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            executable_path=r'C:\Program Files\Google\Chrome\Application\chrome.exe', headless=True)
+        executable = chrome_executable()
+        if executable is None:
+            raise RuntimeError('Chrome/Chromium not found; set GEO_CHROME_PATH')
+        browser = pw.chromium.launch(executable_path=str(executable), headless=True)
         try:
             page = browser.new_page(viewport={'width': 1440, 'height': 1000})
             page.set_default_timeout(20000)

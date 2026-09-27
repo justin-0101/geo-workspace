@@ -22,16 +22,18 @@ import urllib.parse
 from collections import defaultdict
 
 from playwright.sync_api import sync_playwright
+from browser_paths import chrome_executable
+from runtime_config import API_URL, FRONTEND_URL
 
 
 def default_url():
     """从本地 API 取一个真实项目，避免把某个项目 slug 写死在门禁里。"""
-    with urllib.request.urlopen('http://127.0.0.1:8798/api/projects', timeout=10) as response:
+    with urllib.request.urlopen(f'{API_URL}/api/projects', timeout=10) as response:
         projects = json.loads(response.read().decode('utf-8')).get('projects', [])
     if not projects:
-        return 'http://127.0.0.1:4173/workspace.html#publications'
+        return f'{FRONTEND_URL}/workspace.html#publications'
     slug = urllib.parse.quote(projects[0]['slug'])
-    return f'http://127.0.0.1:4173/workspace.html#publications?project={slug}'
+    return f'{FRONTEND_URL}/workspace.html#publications?project={slug}'
 
 
 URLS = sys.argv[1:] or [default_url()]
@@ -152,7 +154,10 @@ def collect(page):
 def main():
     fails = []
     with sync_playwright() as pw:
-        b = pw.chromium.launch(executable_path=r'C:\Program Files\Google\Chrome\Application\chrome.exe', headless=True)
+        executable = chrome_executable()
+        if executable is None:
+            raise RuntimeError('Chrome/Chromium not found; set GEO_CHROME_PATH')
+        b = pw.chromium.launch(executable_path=str(executable), headless=True)
         for url in URLS:
             p = b.new_page(viewport={'width': 1440, 'height': 1000})
             p.set_default_timeout(20000)

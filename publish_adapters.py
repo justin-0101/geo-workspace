@@ -110,20 +110,44 @@ class PublishAdapter:
 
     # --- 具体实现 -----------------------------------------------------------
     def submit_api(self, asset, evidence_dir=None):
-        """微信公众号：写入草稿箱。"""
+        """微信公众号：备好封面 → 上传永久素材 → 写入草稿箱。
+
+        图文消息（article_type=news）的封面是**必填**的。原来的实现直接调
+        草稿接口不带 thumb_media_id，只会换来一个 40007，看不出到底是哪里错。
+        所以这里把三件事拆开，每一步的失败原因分开报。
+        """
+        import cover_gen
         import wechat_mp
         appid = credentials.get(self.spec.id, 'appid')
         secret = credentials.get(self.spec.id, 'secret')
+
+        # 1) 封面：资产里给了就用，没给就按标题本地生成（不依赖外部生图额度）
+        try:
+            cover_path = cover_gen.ensure_cover(asset, evidence_dir)
+        except cover_gen.CoverError as exc:
+            return PublishResult('manual_required', f'封面不可用：{exc}')
+
         client = wechat_mp.WechatMpClient(appid, secret)
+        # 2) 上传为永久素材，拿 thumb_media_id（临时素材 3 天就过期）
+        try:
+            thumb_media_id = client.upload_thumb(cover_path.name, cover_path.read_bytes())
+        except Exception as exc:
+            return PublishResult('failed', f'封面素材上传失败：{str(exc)[:200]}')
+        if not thumb_media_id:
+            return PublishResult('failed', '封面素材上传后没有拿到 media_id，已中止（未写草稿）')
+
+        # 3) 写草稿
         try:
             out = client.add_draft(title=asset.get('title', ''), content=asset.get('body', ''),
-                                   digest=(asset.get('brief') or '')[:120])
+                                   digest=(asset.get('brief') or '')[:120],
+                                   thumb_media_id=thumb_media_id)
         except Exception as exc:
             return PublishResult('failed', f'公众号接口调用失败：{str(exc)[:200]}')
         media_id = out.get('media_id', '')
         return PublishResult('draft_created',
-                             f'已写入公众号草稿箱（media_id {media_id[:12]}…）。'
-                             f'内容仍是草稿，需在公众号后台群发后才算发布。')
+                             f'已写入公众号草稿箱（media_id {media_id[:12]}…，封面 {cover_path.name}）。'
+                             f'内容仍是草稿，需在公众号后台群发后才算发布。',
+                             evidence=str(cover_path))
 
     def submit_browser(self, asset, evidence_dir=None):
         """其他平台：浏览器自动化。"""

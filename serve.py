@@ -18,24 +18,41 @@ import sys
 import time
 from pathlib import Path
 
+from ports import port_busy
+from runtime_config import API_PORT, FRONTEND_PORT, LOCAL_HOST
+
 ROOT = Path(__file__).resolve().parent
-FRONT_PORT, API_PORT = 4173, 8798
 
 #: 不给子进程分配控制台窗口（否则会弹终端，且关窗=杀服务）
 NO_WINDOW = 0x08000000 if sys.platform == 'win32' else 0
 
 CHILDREN = (
-    (f'前端 :{FRONT_PORT}', [sys.executable, 'frontend_server.py']),
+    (f'前端 :{FRONTEND_PORT}', [sys.executable, 'frontend_server.py']),
     (f'API :{API_PORT}', [sys.executable, '-m', 'uvicorn', 'workflow_api:app',
-                          '--host', '127.0.0.1', '--port', str(API_PORT)]),
+                          '--host', LOCAL_HOST, '--port', str(API_PORT)]),
 )
 
 
 def main() -> int:
+    occupied = []
+    for label, port in (('前端', FRONTEND_PORT), ('API', API_PORT)):
+        if port_busy(host=LOCAL_HOST, port=port):
+            occupied.append(f'{label}端口 {port}')
+    if occupied:
+        print('启动中止：' + '、'.join(occupied) + ' 已被占用，请先运行 python start.py --status 检查归属。', flush=True)
+        return 2
+
     procs = []
-    for label, argv in CHILDREN:
-        print(f'启动 {label}: {" ".join(argv[1:])}', flush=True)
-        procs.append((label, subprocess.Popen(argv, cwd=ROOT, creationflags=NO_WINDOW)))
+    try:
+        for label, argv in CHILDREN:
+            print(f'启动 {label}: {" ".join(argv[1:])}', flush=True)
+            flags = NO_WINDOW | (0x00000200 if sys.platform == 'win32' else 0)
+            procs.append((label, subprocess.Popen(argv, cwd=ROOT, creationflags=flags)))
+    except OSError as exc:
+        print(f'启动失败：{exc}', flush=True)
+        for _, proc in procs:
+            proc.terminate()
+        return 1
 
     code = 0
     try:

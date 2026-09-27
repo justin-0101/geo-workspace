@@ -1,6 +1,6 @@
 (() => {
 'use strict';
-const API = 'http://127.0.0.1:8798';
+const API = window.GEO_API_URL || 'http://127.0.0.1:8798';
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // 后端时间戳都是 UTC（带 +00:00），直接截字符串会比本地时间早 8 小时。
