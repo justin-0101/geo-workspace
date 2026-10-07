@@ -369,14 +369,14 @@ def stop(slug,run_id):
 
 
 def archive(slug,run_id,confirmed):
-    if confirmed is not True: raise ValueError('请确认终止本批次，尚未执行的任务将不再提交')
+    if confirmed is not True: raise ValueError('请确认终止诊断，尚未执行的任务将不再提交')
     with _LOCK:
         if _ACTIVE and (_ACTIVE['slug'],_ACTIVE['run_id'])==(slug,run_id):
             raise ValueError('请先停止当前执行进程')
         row=get_run(slug,run_id)
         if row['status'] in {'completed','degraded'}: raise ValueError('已完成批次无需终止')
         transition(slug,run_id,'archived','批次已终止，证据保留，不作为完整诊断报告')
-    return {'message':'已终止本批次'}
+    return {'message':'诊断已终止'}
 
 
 def shutdown():

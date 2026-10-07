@@ -777,3 +777,39 @@ label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:p
   color:var(--notice-ink);background:var(--notice-bg);border-left:3px solid var(--orange-mark);border-radius:6px}
 .pick-banner a{color:var(--blue);font-weight:700;text-decoration:none;margin-left:6px}
 .pick-banner a:hover{text-decoration:underline}
+
+/* 执行与结果：状态驱动操作区。主操作、辅助操作和终止操作保持清晰层级。 */
+.run-panel{padding:0;overflow:hidden}
+.run-batchbar{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:var(--sp-4);align-items:center;padding:var(--sp-4) var(--sp-5);border-bottom:1px solid var(--line-soft)}
+.run-batchbar select{width:100%}
+.run-counts{display:flex;align-items:center;gap:var(--sp-5);color:var(--muted);font-size:var(--fs-meta);font-variant-numeric:tabular-nums}
+.run-counts strong{color:var(--ink)}
+.run-control{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,.55fr);gap:var(--sp-6);padding:var(--sp-6) var(--sp-5)}
+.run-control-main{min-width:0;padding:2px 0 2px var(--sp-5);border-left:3px solid var(--blue)}
+.run-control.blocked .run-control-main,.run-control.login .run-control-main,.run-control.frozen .run-control-main{border-left-color:var(--orange-mark)}
+.run-control.interrupted .run-control-main{border-left-color:var(--red)}
+.run-control.ready .run-control-main,.run-control.completed .run-control-main{border-left-color:var(--green)}
+.run-kicker{margin:0 0 var(--sp-2);color:var(--muted);font-size:var(--fs-meta);font-weight:700}
+.run-control h2{margin:0 0 var(--sp-2);font-size:var(--fs-lg)}
+.run-control-main>.muted{margin:0;max-width:760px}
+.run-actions{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;margin-top:var(--sp-5)}
+.run-actions .danger{color:var(--red);border-color:#e4bfc1;background:#fffafa}
+.run-actions .danger:hover{color:var(--red);background:var(--red2);border-color:#d69a9e}
+.run-help{margin:var(--sp-3) 0 0;color:var(--muted);font-size:var(--fs-meta)}
+.run-platforms{border:1px solid var(--line);border-radius:var(--r-field);background:var(--bg);overflow:hidden}
+.run-platform-head{margin:0;padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--fs-meta)}
+.run-platform-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--sp-3);align-items:center;padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--line-soft)}
+.run-platform-row:last-child{border-bottom:0}
+.run-platform-row strong{font-size:var(--fs-note)}
+.run-platform-state{display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-meta);font-weight:700}
+.run-platform-state::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--line-input)}
+.run-platform-state.good{color:var(--green)}.run-platform-state.good::before{background:var(--green)}
+.run-platform-state.warn{color:var(--orange)}.run-platform-state.warn::before{background:var(--orange-mark)}
+.run-platform-state.bad{color:var(--red)}.run-platform-state.bad::before{background:var(--red)}
+.run-platform-state.muted{color:var(--muted)}
+.run-platform-empty{margin:0;padding:var(--sp-4);color:var(--muted);font-size:var(--fs-meta)}
+.run-task-head{display:flex;align-items:end;justify-content:space-between;gap:var(--sp-4);padding:var(--sp-5) var(--sp-5) var(--sp-3);border-top:1px solid var(--line-soft)}
+.run-task-head h3{margin:0;font-size:var(--fs-card)}
+.run-task-head span{color:var(--muted);font-size:var(--fs-meta);font-variant-numeric:tabular-nums}
+.run-panel>.table-scroll{padding:0 var(--sp-5) var(--sp-5)}
+@media(max-width:900px){.run-batchbar,.run-control{grid-template-columns:1fr}.run-counts{justify-content:space-between}.run-control-main{padding-left:var(--sp-4)}}

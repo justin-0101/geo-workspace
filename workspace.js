@@ -31,11 +31,11 @@ function md(text) {
  }
  return out.join('');
 }
-const labels = {workbench:'工作台',projects:'诊断项目',actions:'改善任务',content:'内容生产',library:'内容库',publications:'批量发布',reports:'报告中心',platforms:'模型与平台',settings:'设置'};
+const labels = {workbench:'工作台',projects:'诊断项目',actions:'优化清单',content:'内容生产',library:'内容库',publications:'批量发布',reports:'报告中心',platforms:'模型与平台',settings:'设置'};
 const pageIntro = {
  '工作台':'集中查看待处理事项和最近活动。',
  '诊断项目':'创建并管理 GEO 诊断项目。',
- '改善任务':'把诊断结论转成可执行的改善任务。',
+ '优化清单':'把诊断结论转成可执行的改善任务。',
  '内容生产':'确认写作任务书与素材，生成初稿。',
  '内容库':'查看、编辑与审核所有生成的初稿。',
  '批量发布':'把已审核的内容一次投到多个平台。',
@@ -185,13 +185,70 @@ async function render() {
   } else {
    if(!d.runs.length){v.innerHTML='<section class="panel"><p class="empty">尚未创建诊断批次</p><a class="button primary" href="'+link('projects',slug,'config')+'">配置诊断</a></section>';return;}
    const selected=params.get('run')||d.runs[0].id,r=await api(base+'/runs/'+encodeURIComponent(selected));if(token!==epoch)return;
-   const operations=r.status==='ready'?[['execute','开始诊断'],['close-browser','关闭诊断浏览器']]:r.status==='login'?[['resume','已完成登录'],['close-browser','关闭诊断浏览器'],['stop','停止']]:r.status==='running'?[['resume','已处理验证'],['stop','停止']]:r.status==='preflight'?[['stop','停止']]:['frozen','blocked','interrupted'].includes(r.status)?[['preflight','检查环境'],['login','打开登录窗口'],['close-browser','关闭诊断浏览器']]:[];
-   if(['frozen','blocked','interrupted','ready'].includes(r.status))operations.push(['archive','终止本批次']);
-   if(r.status==='interrupted' && r.tasks.length && r.tasks.every(t=>['success','failed'].includes(t.status)))operations.push(['report','重新生成报告']);
-   v.innerHTML=`<section class="panel"><div class="toolbar"><select id="batch" aria-label="诊断批次">${d.runs.map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(localTime(x.created_at))} · ${esc(states[x.status]||x.status)}</option>`).join('')}</select>${badge(r.status)}${operations.map(([k,l])=>`<button data-op="${k}" class="${k==='execute'?'primary':''}">${l}</button>`).join('')}</div>${r.paused?`<div class="panel" style="margin:0 0 18px;background:var(--orange2);border-color:var(--notice-line)"><strong>平台要求人工验证，执行已暂停</strong><p class="muted" style="margin:8px 0">待处理：${esc((r.waiting_tasks||[]).join('、'))}。请在已打开的浏览器窗口完成登录或验证码，然后点击“已处理验证”继续。系统不会重新提交本题问题。</p></div>`:''}${r.blocker?`<p class="muted">${esc(r.blocker)}</p>`:''}${(r.preflight||[]).length?`<p class="muted">平台检查：${r.preflight.map(c=>`${esc(c.platform)} ${c.check==='OK'?(c.login_state_guess==='logged_in'?'已登录':'未登录'):'打不开'}`).join(' · ')}</p>`:''}<p>成功 ${r.state.success||0} · 失败 ${r.state.failed||0} · 待执行 ${r.state.pending||0}</p><div class="table-scroll"><table><thead><tr><th>任务</th><th>平台</th><th>状态</th><th>结果</th></tr></thead><tbody>${r.tasks.map(t=>`<tr><td><strong>${esc(t.question_id)}</strong><div class="muted" style="max-width:480px;margin-top:5px">${esc(t.prompt)}</div></td><td>${esc(t.platform_label)}</td><td>${badge(t.status)}</td><td>${r.observations.some(o=>o.task_id===t.task_id)?`<button data-result="${esc(t.task_id)}" aria-expanded="false">查看回答与证据</button>`:esc(t.failure_reason||'')}</td></tr>`).join('')}</tbody></table></div></section>`;
+   const checks=r.preflight||[];
+   const platforms=[...new Map(r.tasks.map(t=>[t.platform_id,{id:t.platform_id,label:t.platform_label}])).values()];
+   const checkByPlatform=new Map(checks.map(c=>[c.platform,c]));
+   const platformStates=platforms.map(p=>{
+    const c=checkByPlatform.get(p.id)||checkByPlatform.get(p.label);
+    if(r.status==='ready')return {...p,labelText:'已登录',tone:'good'};
+    if(!c)return {...p,labelText:'尚未检查',tone:'muted'};
+    if(c.check!=='OK')return {...p,labelText:'无法检查',tone:'bad'};
+    return c.login_state_guess==='logged_in'?{...p,labelText:'已登录',tone:'good'}:{...p,labelText:'待登录',tone:'warn'};
+   });
+   const needLogin=platformStates.filter(p=>p.labelText==='待登录');
+   const allTerminal=r.tasks.length&&r.tasks.every(t=>['success','failed'].includes(t.status));
+   let runTitle=states[r.status]||r.status,runCopy=r.blocker||'本批次状态已更新。',operations=[];
+   if(r.status==='frozen'){
+    runTitle='先检查平台环境';runCopy='检查平台是否可以访问并确认登录状态，检查过程不会提交诊断问题。';
+    operations=[['preflight','检查环境','primary'],['archive','终止诊断','danger']];
+   }else if(r.status==='blocked'){
+    if(needLogin.length){
+     const names=needLogin.map(p=>p.label);
+     runTitle=`${names.join('、')}尚未登录`;
+     runCopy='请在诊断浏览器中完成登录。完成后返回此页确认，再重新检测平台状态。';
+     operations=[['login',names.length===1?`去登录${names[0]}`:'去登录待登录平台','primary'],['preflight','重新检测',''],['archive','终止诊断','danger']];
+    }else{
+     runTitle='部分平台暂时无法检查';runCopy=r.blocker||'请检查网络和平台状态后重新检测。';
+     operations=[['preflight','重新检测','primary'],['archive','终止诊断','danger']];
+    }
+   }else if(r.status==='interrupted'){
+    runTitle='诊断已中断';runCopy=r.blocker||'已完成的结果已经保留，请先核对任务状态再继续。';
+    operations=allTerminal?[['report','重新生成报告','primary'],['archive','终止诊断','danger']]:[['preflight','重新检测','primary'],['archive','终止诊断','danger']];
+   }else if(r.status==='ready'){
+    runTitle='平台环境已就绪';runCopy='登录状态已经确认，可以开始本次诊断。';
+    operations=[['execute','开始诊断','primary'],['archive','终止诊断','danger']];
+   }else if(r.status==='login'){
+    runTitle='请完成平台登录';runCopy='在已经打开的诊断浏览器中完成登录，然后返回这里继续。';
+    operations=[['resume','已完成登录','primary'],['stop','停止登录','danger']];
+   }else if(r.status==='preflight'){
+    runTitle='正在检查平台环境';runCopy='正在读取平台访问和登录状态，请稍候。';
+    operations=[['stop','停止检查','danger']];
+   }else if(r.status==='running'){
+    runTitle=r.paused?'平台要求人工验证':'诊断正在执行';
+    runCopy=r.paused?`待处理：${(r.waiting_tasks||[]).join('、')}。请在诊断浏览器中完成登录或验证码，系统不会重新提交当前问题。`:'已完成的结果会持续保存，可以稍后返回查看。';
+    operations=[...(r.paused?[['resume','已处理验证','primary']]:[]),['stop','停止诊断','danger']];
+   }else if(r.status==='completed'){
+    runTitle='本次诊断已完成';runCopy='任务结果和证据已经保存，可以查看详情或生成改善任务。';
+   }else if(r.status==='degraded'){
+    runTitle='报告已生成，但证据不完整';runCopy=r.blocker||'请先核对缺失的结果或证据。';
+   }else if(r.status==='archived'){
+    runTitle='诊断已终止';runCopy='已保存的证据仍然保留，未执行任务不会再提交。';
+   }
+   const platformRows=platformStates.map(p=>`<div class="run-platform-row"><strong>${esc(p.label)}</strong><span class="run-platform-state ${p.tone}">${esc(p.labelText)}</span></div>`).join('')||'<p class="run-platform-empty">本批次没有平台任务</p>';
+   v.innerHTML=`<section class="panel run-panel"><div class="run-batchbar"><select id="batch" aria-label="诊断批次">${d.runs.map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(localTime(x.created_at))} · ${esc(states[x.status]||x.status)}</option>`).join('')}</select><div class="run-counts"><span>成功 <strong>${r.state.success||0}</strong></span><span>失败 <strong>${r.state.failed||0}</strong></span><span>待执行 <strong>${r.state.pending||0}</strong></span></div></div><div class="run-control ${esc(r.status)}"><div class="run-control-main"><p class="run-kicker">${esc(states[r.status]||r.status)}</p><h2>${esc(runTitle)}</h2><p class="muted">${esc(runCopy)}</p><div class="run-actions">${operations.map(([k,l,c])=>`<button data-op="${k}" class="${c||''}">${esc(l)}</button>`).join('')}</div>${r.status==='login'?'<p class="run-help">登录完成后点击“已完成登录”，系统将关闭登录窗口并返回待检查状态。</p>':''}</div><aside class="run-platforms"><p class="run-platform-head">平台状态</p>${platformRows}</aside></div><div class="run-task-head"><h3>诊断任务</h3><span>共 ${r.tasks.length} 项</span></div><div class="table-scroll"><table><thead><tr><th>任务</th><th>平台</th><th>状态</th><th>结果</th></tr></thead><tbody>${r.tasks.map(t=>`<tr><td><strong>${esc(t.question_id)}</strong><div class="muted" style="max-width:480px;margin-top:5px">${esc(t.prompt)}</div></td><td>${esc(t.platform_label)}</td><td>${badge(t.status)}</td><td>${r.observations.some(o=>o.task_id===t.task_id)?`<button data-result="${esc(t.task_id)}" aria-expanded="false">查看回答与证据</button>`:esc(t.failure_reason||'')}</td></tr>`).join('')}</tbody></table></div></section>`;
    if(['completed','degraded'].includes(r.status)){v.insertAdjacentHTML('afterbegin','<div class="toolbar"><button id="derive" class="primary">生成改善任务</button></div>');$('#derive').onclick=async()=>{try{const out=await api(base+'/runs/'+selected+'/improvements/derive','POST',{});notice(out.created?`已生成 ${out.created} 条改善任务`:'没有新的可生成项（仅取有证据的成功观测）');location.hash=link('actions',slug);}catch(err){notice(err.message);}};}
    $('#batch').onchange=e=>{location.hash=link('projects',slug,'runs')+'&run='+encodeURIComponent(e.target.value);};
-   document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>modal(b.textContent,b.dataset.op==='execute'?'<p>将向所选平台提交冻结问题。请确认主体资料可用于本次诊断。</p>':'<p>确认执行此操作？</p>',()=>api(base+'/runs/'+selected+'/'+b.dataset.op,'POST',{confirm:true}),b.textContent));
+   document.querySelectorAll('[data-op]').forEach(b=>b.onclick=async()=>{
+    const op=b.dataset.op,path=base+'/runs/'+selected+'/'+op;
+    if(['execute','archive','stop'].includes(op)){
+     const title=op==='archive'?'终止诊断':op==='stop'?b.textContent:'开始诊断';
+     const body=op==='archive'?`<p>尚未执行的 ${r.state.pending||0} 项任务将不再提交，已保存的证据会保留。</p>`:op==='execute'?'<p>将向所选平台提交冻结问题。请确认主体资料可用于本次诊断。</p>':'<p>当前进程将停止，已经提交的问题不会自动重试。</p>';
+     const confirm=op==='archive'?'确认终止':b.textContent;
+     modal(title,body,()=>api(path,'POST',{confirm:true}),confirm);return;
+    }
+    b.disabled=true;
+    try{const out=await api(path,'POST',{confirm:true});await render();if(out&&out.message)notice(out.message);}catch(err){notice(err.message);b.disabled=false;}
+   });
    // 行内展开：详情插在被点那一行下面。同一时刻只开一行，再点一次收起
    document.querySelectorAll('[data-result]').forEach(b=>b.onclick=()=>{
     const o=r.observations.find(x=>x.task_id===b.dataset.result),row=b.closest('tr');

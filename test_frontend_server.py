@@ -56,6 +56,16 @@ class FrontendAllowlistTests(unittest.TestCase):
         self.assertIn("api(base+'/question-suggestions','POST',{},QUESTION_SUGGESTION_TIMEOUT)", source)
         self.assertIn("button.disabled=true", source)
 
+    def test_run_actions_and_navigation_use_approved_labels(self):
+        root = Path(__file__).parent
+        html = (root / 'workspace.html').read_text(encoding='utf-8')
+        source = (root / 'workspace.js').read_text(encoding='utf-8')
+        self.assertIn('<a href="#actions">优化清单</a>', html)
+        self.assertIn("actions:'优化清单'", source)
+        self.assertIn("['archive','终止诊断','danger']", source)
+        self.assertNotIn('关闭诊断浏览器', source)
+        self.assertNotIn("'close-browser'", source)
+
 
 if __name__ == '__main__':
     unittest.main()

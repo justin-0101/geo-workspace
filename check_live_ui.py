@@ -104,8 +104,8 @@ def main():
                 expect(page.locator('#project-view')).to_be_visible()
                 checks.append('run view reachable')
 
-            page.get_by_role('link', name='改善任务', exact=True).click()
-            expect_page_lead('改善任务', '把诊断结论转成可执行的改善任务。')
+            page.get_by_role('link', name='优化清单', exact=True).click()
+            expect_page_lead('优化清单', '把诊断结论转成可执行的改善任务。')
             expect(page.locator('#scope')).to_be_visible()
 
             page.get_by_role('link', name='内容生产', exact=True).click()
