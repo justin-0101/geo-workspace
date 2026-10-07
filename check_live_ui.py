@@ -100,9 +100,19 @@ def main():
                 expect(page.get_by_label('主体名称')).not_to_have_value('')
                 checks.append('saved profile loads')
 
-                page.get_by_role('link', name='执行与结果', exact=True).click()
+                page.get_by_role('link', name='诊断执行', exact=True).click()
                 expect(page.locator('#project-view')).to_be_visible()
                 checks.append('run view reachable')
+                # 终态批次要能从执行页一步进到报告中心，并直接打开本次批次的诊断正文
+                runs = api('/api/projects/' + projects[0]['slug']).get('runs') or []
+                if runs and runs[0]['status'] in ('completed', 'degraded'):
+                    report_link = page.get_by_role('link', name='查看诊断报告', exact=True)
+                    expect(report_link).to_be_visible()
+                    page.screenshot(path=str(OUT / 'live-run-report-entry.png'), full_page=True)
+                    report_link.click()
+                    expect(page.locator('#report-text')).to_be_visible()
+                    expect(page.locator('#report-text table, #report-text h3')).not_to_have_count(0)
+                    checks.append('completed run links to its diagnosis report')
 
             page.get_by_role('link', name='优化清单', exact=True).click()
             expect_page_lead('优化清单', '把诊断结论转成可执行的改善任务。')

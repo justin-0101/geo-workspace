@@ -778,7 +778,7 @@ label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:p
 .pick-banner a{color:var(--blue);font-weight:700;text-decoration:none;margin-left:6px}
 .pick-banner a:hover{text-decoration:underline}
 
-/* 执行与结果：状态驱动操作区。主操作、辅助操作和终止操作保持清晰层级。 */
+/* 诊断执行：状态驱动操作区。主操作、辅助操作和终止操作保持清晰层级。 */
 .run-panel{padding:0;overflow:hidden}
 .run-batchbar{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:var(--sp-4);align-items:center;padding:var(--sp-4) var(--sp-5);border-bottom:1px solid var(--line-soft)}
 .run-batchbar select{width:100%}
