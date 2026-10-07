@@ -6,6 +6,8 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 // 后端时间戳都是 UTC（带 +00:00），直接截字符串会比本地时间早 8 小时。
 const localTime = v => { const d = new Date(v || ''); return isNaN(d) ? '' : d.toLocaleString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}); };
 const localDay = v => { const d = new Date(v || ''); return isNaN(d) ? '' : `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+// 批次标签精确到秒：同一分钟内跑完两批诊断时，分钟级标签会重名，选批次就分不清了。
+const localTimeSec = v => { const d = new Date(v || ''); return isNaN(d) ? '' : d.toLocaleString('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); };
 function md(text) {
  const lines=String(text||'').replace(/\r\n?/g,'\n').split('\n');
  const inline=s=>esc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`(.+?)`/g,'<code>$1</code>');
@@ -43,7 +45,7 @@ const pageIntro = {
  '模型与平台':'查看诊断模型与发布平台的接入方式。',
  '设置':'设置工作空间名称和默认操作人。'
 };
-const states = {archived:'已终止',degraded:'报告不完整',login:'等待登录',frozen:'待检查',preflight:'检查中',ready:'可执行',running:'执行中',paused:'等待人工处理',blocked:'需处理',interrupted:'已中断',completed:'已完成',pending:'待执行',success:'成功',failed:'失败',manual_required:'需人工处理',todo:'待办',doing:'进行中'};
+const states = {archived:'已终止',degraded:'报告不完整',login:'等待登录',frozen:'待检查',preflight:'检查中',ready:'可执行',running:'执行中',paused:'等待人工处理',blocked:'需处理',interrupted:'已中断',completed:'已完成',pending:'待执行',success:'成功',failed:'失败',manual_required:'需人工处理',todo:'待办',doing:'进行中',done:'已完成'};
 let epoch = 0, timer = null;
 // 批量发布的勾选与页签指示条几何：跨重渲染、跨轮询都要保住
 let pubPicked = [], pubPlats = [], pubTabGeo = null;
@@ -61,7 +63,7 @@ function head(title, action='', subtitle=pageIntro[title]||'') {
  return `<div class="page-lead"><div><h1>${esc(title)}</h1>${subtitle?`<p>${esc(subtitle)}</p>`:''}</div>${action?`<div class="page-actions">${action}</div>`:''}</div>`;
 }
 function show(html, token) { if(token===epoch) $('#view').innerHTML=html; }
-const TONES={good:['completed','success','approved','已审核'],bad:['failed','interrupted','blocked'],warn:['pending','todo','frozen','manual_required','login','degraded']};
+const TONES={good:['completed','success','approved','已审核','done'],bad:['failed','interrupted','blocked'],warn:['pending','todo','frozen','manual_required','login','degraded']};
 const tone=s=>Object.keys(TONES).find(k=>TONES[k].includes(s))||'';
 function badge(state) { return `<span class="badge ${tone(state)}">${esc(states[state]||state)}</span>`; }
 const TAB_LABEL={overview:'概览',profile:'主体资料',config:'诊断配置',runs:'诊断执行'};
@@ -238,7 +240,7 @@ async function render() {
    const reportReady=['completed','degraded'].includes(r.status);
    const reportButton=reportReady?`<a class="button" href="${link('reports',slug)}&run=${encodeURIComponent(selected)}">查看诊断报告</a>`:'';
    const platformRows=platformStates.map(p=>`<div class="run-platform-row"><strong>${esc(p.label)}</strong><span class="run-platform-state ${p.tone}">${esc(p.labelText)}</span></div>`).join('')||'<p class="run-platform-empty">本批次没有平台任务</p>';
-   v.innerHTML=`<section class="panel run-panel"><div class="run-batchbar"><select id="batch" aria-label="诊断批次">${d.runs.map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(localTime(x.created_at))} · ${esc(states[x.status]||x.status)}</option>`).join('')}</select><div class="run-counts"><span>成功 <strong>${r.state.success||0}</strong></span><span>失败 <strong>${r.state.failed||0}</strong></span><span>待执行 <strong>${r.state.pending||0}</strong></span></div></div><div class="run-control ${esc(r.status)}"><div class="run-control-main"><p class="run-kicker">${esc(states[r.status]||r.status)}</p><h2>${esc(runTitle)}</h2><p class="muted">${esc(runCopy)}</p><div class="run-actions">${operations.map(([k,l,c])=>`<button data-op="${k}" class="${c||''}">${esc(l)}</button>`).join('')}${reportButton}</div>${r.status==='login'?'<p class="run-help">登录完成后点击“已完成登录”，系统将关闭登录窗口并返回待检查状态。</p>':''}</div><aside class="run-platforms"><p class="run-platform-head">平台状态</p>${platformRows}</aside></div><div class="run-task-head"><h3>诊断任务</h3><span>共 ${r.tasks.length} 项</span></div><div class="table-scroll"><table><thead><tr><th>任务</th><th>平台</th><th>状态</th><th>结果</th></tr></thead><tbody>${r.tasks.map(t=>`<tr><td><strong>${esc(t.question_id)}</strong><div class="muted" style="max-width:480px;margin-top:5px">${esc(t.prompt)}</div></td><td>${esc(t.platform_label)}</td><td>${badge(t.status)}</td><td>${r.observations.some(o=>o.task_id===t.task_id)?`<button data-result="${esc(t.task_id)}" aria-expanded="false">查看回答与证据</button>`:esc(t.failure_reason||'')}</td></tr>`).join('')}</tbody></table></div></section>`;
+   v.innerHTML=`<section class="panel run-panel"><div class="run-batchbar"><select id="batch" aria-label="诊断批次">${d.runs.map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(localTimeSec(x.created_at))} · ${esc(states[x.status]||x.status)}</option>`).join('')}</select><div class="run-counts"><span>成功 <strong>${r.state.success||0}</strong></span><span>失败 <strong>${r.state.failed||0}</strong></span><span>待执行 <strong>${r.state.pending||0}</strong></span></div></div><div class="run-control ${esc(r.status)}"><div class="run-control-main"><p class="run-kicker">${esc(states[r.status]||r.status)}</p><h2>${esc(runTitle)}</h2><p class="muted">${esc(runCopy)}</p><div class="run-actions">${operations.map(([k,l,c])=>`<button data-op="${k}" class="${c||''}">${esc(l)}</button>`).join('')}${reportButton}</div>${r.status==='login'?'<p class="run-help">登录完成后点击“已完成登录”，系统将关闭登录窗口并返回待检查状态。</p>':''}</div><aside class="run-platforms"><p class="run-platform-head">平台状态</p>${platformRows}</aside></div><div class="run-task-head"><h3>诊断任务</h3><span>共 ${r.tasks.length} 项</span></div><div class="table-scroll"><table><thead><tr><th>任务</th><th>平台</th><th>状态</th><th>结果</th></tr></thead><tbody>${r.tasks.map(t=>`<tr><td><strong>${esc(t.question_id)}</strong><div class="muted" style="max-width:480px;margin-top:5px">${esc(t.prompt)}</div></td><td>${esc(t.platform_label)}</td><td>${badge(t.status)}</td><td>${r.observations.some(o=>o.task_id===t.task_id)?`<button data-result="${esc(t.task_id)}" aria-expanded="false">查看回答与证据</button>`:esc(t.failure_reason||'')}</td></tr>`).join('')}</tbody></table></div></section>`;
    if(['completed','degraded'].includes(r.status)){v.insertAdjacentHTML('afterbegin','<div class="toolbar"><button id="derive" class="primary">生成改善任务</button></div>');$('#derive').onclick=async()=>{try{const out=await api(base+'/runs/'+selected+'/improvements/derive','POST',{});notice(out.created?`已生成 ${out.created} 条改善任务`:'没有新的可生成项（仅取有证据的成功观测）');location.hash=link('actions',slug);}catch(err){notice(err.message);}};}
    $('#batch').onchange=e=>{location.hash=link('projects',slug,'runs')+'&run='+encodeURIComponent(e.target.value);};
    document.querySelectorAll('[data-op]').forEach(b=>b.onclick=async()=>{
@@ -319,12 +321,32 @@ async function render() {
    if(wantRun&&rtab==='report'){const i=group.findIndex(r=>r.run_id===wantRun&&r.name==='diagnosis.md');if(i>=0)document.querySelector(`[data-report="${i}"]`)?.click();}
   } else {
    // 各视图需要的清单不一样：改善任务、内容/内容库详情、发布与报告各自取自己的。
-   let items=[];
-   if(view==='actions') items=(await api(base+'/editorial/actions')).items;
+   let items=[],batches=[];
+   if(view==='actions'){const d=await api(base+'/editorial/actions');items=d.items;batches=d.batches||[];}
    else if(view==='content'||params.get('asset')) items=(await api(base+'/editorial/content')).items;
    if(token!==epoch)return;
    if(view==='actions') {
-    $('#module').innerHTML=`<section class="panel">${items.map(x=>`<div class="row"><div><strong>${esc(x.title)}</strong> ${badge(x.status)}<p class="muted">${esc(x.description)}</p><a href="${link('projects',chosen.slug,'runs')+'&run='+x.run_id}">查看诊断依据</a></div><button data-create-asset="${x.id}">编写内容</button></div>`).join('')||'<p class="empty">暂无改善任务。完成诊断后可从结果生成。</p>'}</section>`;
+    // 按诊断批次折叠：默认全部收起，点批次名称才展开该批次的所有任务。
+    // 批次清单来自 execution_runs，所以「诊断完了但还没生成改善任务」的批次也在，不会被误以为上一批被覆盖。
+    const taskRow=x=>`<div class="row"><div><strong>${esc(x.title)}</strong> ${badge(x.status)}<p class="muted">${esc(x.description)}</p><a href="${link('projects',chosen.slug,'runs')+'&run='+x.run_id}">查看诊断依据</a></div><button data-create-asset="${x.id}">编写内容</button></div>`;
+    const runLink=b=>link('projects',chosen.slug,'runs')+'&run='+encodeURIComponent(b.id);
+    const derivable=s=>['completed','degraded'].includes(s);
+    const group=b=>{
+     const list=items.filter(x=>x.run_id===b.id),c=b.counts||{};
+     const meta=c.total?`共 ${c.total} 条 · 待办 ${c.todo||0} · 进行中 ${c.doing||0} · 已完成 ${c.done||0}`:'本批次还没有任务';
+     const body=list.length
+      ?list.map(taskRow).join('')
+      :`<div class="batch-empty"><p class="muted">本批次尚未生成改善任务。${derivable(b.status)?'请到「诊断执行」页点「生成改善任务」，只取有证据的成功观测。':`该批次状态为「${esc(states[b.status]||b.status)}」，当前不能生成改善任务。`}</p><a class="button" href="${runLink(b)}">去诊断执行</a></div>`;
+     return `<details class="batch" data-batch="${esc(b.id)}"><summary><span class="batch-name">${esc(localTimeSec(b.created_at))}</span>${badge(b.status)}<span class="batch-meta">${esc(meta)}</span></summary><div class="batch-body">${body}</div></details>`;
+    };
+    $('#module').innerHTML=batches.length
+     ?`<div class="toolbar"><button id="toggle-batches" type="button">全部展开</button><span class="muted">共 ${batches.length} 个诊断批次，按时间从新到旧</span></div><section class="panel batch-list">${batches.map(group).join('')}</section>`
+     :'<p class="empty">暂无改善任务。完成诊断后可从结果生成。</p>';
+    const batchBoxes=()=>[...document.querySelectorAll('#module details.batch')];
+    const syncToggle=()=>{const btn=$('#toggle-batches');if(btn)btn.textContent=batchBoxes().length&&batchBoxes().every(d=>d.open)?'全部收起':'全部展开';};
+    if($('#toggle-batches'))$('#toggle-batches').onclick=()=>{const open=!batchBoxes().every(d=>d.open);batchBoxes().forEach(d=>{d.open=open;});syncToggle();};
+    // 单个批次手动开合后同步按钮文案，避免按钮写着「全部展开」但其实已经全开。
+    batchBoxes().forEach(d=>d.addEventListener('toggle',syncToggle));
     document.querySelectorAll('[data-create-asset]').forEach(b=>b.onclick=async()=>{try{const x=await api(base+'/actions/'+b.dataset.createAsset+'/content','POST',{});location.hash=link('content',chosen.slug)+'&asset='+x.id;}catch(err){notice(err.message);}});
    } else if(view==='content') {
     // 内容生产：只负责「写作任务书 + 素材 → 生成初稿」。稿件在「内容库」查看与编辑。

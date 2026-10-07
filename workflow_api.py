@@ -277,7 +277,18 @@ def editorial_list(slug: str,kind: str):
     table={'actions':'improvement_items','content':'editorial_assets','publications':'publishing_jobs'}.get(kind)
     if not table: raise KeyError('功能不存在')
     with store.connection() as c:
-        return {'items':[dict(r) for r in c.execute(f'SELECT * FROM {table} WHERE project_slug=? ORDER BY created_at DESC',(slug,))]}
+        items=[dict(r) for r in c.execute(f'SELECT * FROM {table} WHERE project_slug=? ORDER BY created_at DESC',(slug,))]
+        if kind!='actions': return {'items':items}
+        # 优化清单按诊断批次分组。批次清单取自 execution_runs 而不是 improvement_items，
+        # 这样「诊断已完成但还没生成改善任务」的批次也会出现，不会被误认为清单被覆盖掉了。
+        counts={r['run_id']:dict(total=r['n'],todo=r['todo'],doing=r['doing'],done=r['done']) for r in c.execute('''
+            SELECT run_id,count(*) AS n,sum(status='todo') AS todo,sum(status='doing') AS doing,sum(status='done') AS done
+            FROM improvement_items WHERE project_slug=? GROUP BY run_id''',(slug,))}
+        batches=[dict(r) for r in c.execute(
+            'SELECT id,status,blocker,created_at FROM execution_runs WHERE project_slug=? ORDER BY created_at DESC,rowid DESC',(slug,))]
+    empty={'total':0,'todo':0,'doing':0,'done':0}
+    for batch in batches: batch['counts']=counts.get(batch['id'],dict(empty))
+    return {'items':items,'batches':batches}
 
 @app.post('/api/projects/{slug}/actions/{identity}/content')
 def asset_create(slug: str,identity: str): return editorial.create_asset(slug,identity)

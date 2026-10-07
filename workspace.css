@@ -813,3 +813,28 @@ label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:p
 .run-task-head span{color:var(--muted);font-size:var(--fs-meta);font-variant-numeric:tabular-nums}
 .run-panel>.table-scroll{padding:0 var(--sp-5) var(--sp-5)}
 @media(max-width:900px){.run-batchbar,.run-control{grid-template-columns:1fr}.run-counts{justify-content:space-between}.run-control-main{padding-left:var(--sp-4)}}
+
+/* 优化清单：按诊断批次折叠。默认收起，点批次名称展开该批次的所有任务。
+   复用 .gate-details 的展开箭头与 hover 语言，不新造一套交互样式。 */
+.batch-list{padding:0;overflow:hidden}
+.batch{border-bottom:1px solid var(--line)}
+.batch:last-child{border-bottom:0}
+.batch summary{
+  display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
+  width:100%;min-height:56px;padding:var(--sp-3) var(--sp-5);
+  list-style:none;cursor:pointer;
+  transition:background-color .12s ease;
+}
+.batch summary::-webkit-details-marker{display:none}
+.batch summary::after{content:"";width:7px;height:7px;flex:0 0 auto;
+  border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+  transform:rotate(45deg) translate(-2px,-2px);transition:transform .12s ease}
+.batch[open] summary::after{transform:rotate(-135deg) translate(-2px,-2px)}
+.batch summary:hover{background:var(--blue2)}
+.batch[open] summary{background:var(--blue2)}
+.batch-name{font-size:var(--fs-note);font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.batch-meta{margin-left:auto;color:var(--muted);font-size:var(--fs-meta);font-variant-numeric:tabular-nums}
+.batch-body{padding:0 var(--sp-5) var(--sp-4);border-top:1px solid var(--line-soft)}
+.batch-empty{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);flex-wrap:wrap;padding:var(--sp-4) 0 0}
+.batch-empty p{margin:0;max-width:760px;font-size:var(--fs-meta);line-height:1.65}
+@media(max-width:900px){.batch-meta{margin-left:0;flex-basis:100%;order:3}}

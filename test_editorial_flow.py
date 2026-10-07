@@ -166,6 +166,34 @@ class EditorialTests(APITests):
         self.assertEqual(len(bundle['observations']),1)
         self.assertEqual(bundle['observations'][0]['fact_status'],'unverified-model-response')
 
+    def test_actions_list_keeps_every_batch_separately(self):
+        """优化清单按批次分组：新批次的清单不会覆盖旧批次，两批各自保留。"""
+        slug,base,aid=self.seed()
+        first=self.client.get(base).json()['runs'][0]['id']
+        d=self.client.get(base+'/editorial/actions').json()
+        self.assertEqual([b['id'] for b in d['batches']],[first])
+        self.assertEqual(d['batches'][0]['counts'],{'total':1,'todo':0,'doing':1,'done':0})
+        # 第二批：冻结并完成后，即使还没生成改善任务，也必须出现在批次列表里
+        profile=dict(canonical_name='测试项目',business='设备维护',region='广州',audience='工厂',aliases=[],official_pages=[],no_official_web_presence=True)
+        revision=self.client.get(base).json()['revision']
+        self.assertEqual(self.client.put(base+'/profile',json=dict(profile=profile,questions=suggest_questions(profile),platforms=['deepseek'],revision=revision)).status_code,200)
+        second=self.client.post(base+'/runs',json={'confirm':True,'revision':revision+1}).json()['id']
+        self.assertNotEqual(second,first)
+        with store.connection() as c: c.execute("UPDATE execution_runs SET status='completed' WHERE id=?",(second,))
+        d2=self.client.get(base+'/editorial/actions').json()
+        self.assertEqual([b['id'] for b in d2['batches']],[second,first])                                      # 最新批次在最前
+        self.assertEqual(d2['batches'][0]['counts'],{'total':0,'todo':0,'doing':0,'done':0})
+        self.assertEqual(len(d2['items']),1)                                                                   # 旧批次的任务还在，没有被新批次清掉
+        # 新批次 derive 只新增自己的任务，两批的状态互不干扰
+        path=verify_frozen_run(slug,second)
+        (path/'observations.jsonl').write_text(json.dumps(dict(task_id='Q01_deepseek_01',question_id='Q01',question_type='non_brand',status='success',response_text='TEST FIXTURE 2',input_prompt='第二批测试问题',evidence_files=['evidence/test.txt'],classification={'brand_mention':'no'}))+chr(10),encoding='utf8')
+        self.assertEqual(self.client.post(base+'/runs/'+second+'/improvements/derive').json()['created'],1)
+        d3=self.client.get(base+'/editorial/actions').json()
+        self.assertEqual(len(d3['items']),2)
+        self.assertEqual({i['run_id'] for i in d3['items']},{first,second})
+        self.assertEqual(next(i for i in d3['items'] if i['run_id']==first)['status'],'doing')                   # 旧批次进度不被新批次重置
+        self.assertEqual(d3['batches'][0]['counts'],{'total':1,'todo':1,'doing':0,'done':0})
+
     def test_diagnosis_asset_bundle_carries_question_and_evidence(self):
         slug,base,aid=self.seed()
         ctx=self.client.get(base+'/content/'+aid+'/context').json()

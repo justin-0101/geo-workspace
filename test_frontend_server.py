@@ -69,6 +69,18 @@ class FrontendAllowlistTests(unittest.TestCase):
         self.assertNotIn('关闭诊断浏览器', source)
         self.assertNotIn("'close-browser'", source)
 
+    def test_actions_are_grouped_by_batch_and_collapsed_by_default(self):
+        source = (Path(__file__).with_name('workspace.js')).read_text(encoding='utf-8')
+        # 优化清单必须按诊断批次折叠：批次清单来自接口的 batches，且默认不写 open（全部收起）
+        self.assertIn("batches=d.batches||[]", source)
+        self.assertIn('<details class="batch" data-batch=', source)
+        self.assertNotIn('<details class="batch" open', source)
+        self.assertIn('toggle-batches', source)
+        # 批次标签精确到秒：分钟级标签在同一分钟内跑完两批时会重名，选批次就分不清了
+        self.assertIn('localTimeSec(b.created_at)', source)
+        # 任务完成后徽章要有中文，不能直接漏出英文 done
+        self.assertIn("done:'已完成'", source)
+
 
 if __name__ == '__main__':
     unittest.main()

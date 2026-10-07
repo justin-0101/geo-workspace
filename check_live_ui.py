@@ -117,6 +117,27 @@ def main():
             page.get_by_role('link', name='优化清单', exact=True).click()
             expect_page_lead('优化清单', '把诊断结论转成可执行的改善任务。')
             expect(page.locator('#scope')).to_be_visible()
+            # 优化清单按诊断批次折叠：默认全部收起，点批次名称才展开该批次的任务
+            batches = api('/api/projects/' + projects[0]['slug'] + '/editorial/actions')['batches'] if projects else []
+            if batches:
+                boxes = page.locator('#module details.batch')
+                expect(boxes).to_have_count(len(batches))
+                expect(page.locator('#module details.batch[open]')).to_have_count(0)   # 默认折叠
+                if batches[0]['counts']['total']:
+                    expect(boxes.first.locator('.row').first).to_be_hidden()           # 收起时看不到任务
+                boxes.first.locator('summary').click()
+                expect(boxes.first).to_have_attribute('open', '')
+                if batches[0]['counts']['total']:
+                    expect(boxes.first.locator('.row')).to_have_count(batches[0]['counts']['total'])
+                    expect(boxes.first.get_by_role('button', name='编写内容', exact=True).first).to_be_visible()
+                else:
+                    expect(boxes.first.locator('.batch-empty')).to_be_visible()        # 空批次要说清楚为什么是空的
+                page.screenshot(path=str(OUT / 'live-actions-batches.png'), full_page=True)
+                boxes.first.locator('summary').click()
+                expect(page.locator('#module details.batch[open]')).to_have_count(0)   # 再点收起
+                checks.append('actions list groups tasks by diagnosis batch')
+            else:
+                checks.append('actions list has no diagnosis batch yet')
 
             page.get_by_role('link', name='内容生产', exact=True).click()
             expect_page_lead('内容生产', '确认写作任务书与素材，生成初稿。')
