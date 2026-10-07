@@ -38,6 +38,13 @@ TARGETS = {
         title=['input[placeholder*="标题"]', '.article-bar__title input'],
         body=['textarea', '.editor__inner', '.cledit-section'],
         save=['保存草稿', '发布文章'], success=['保存成功', '发布成功']),
+    'cnblogs': dict(
+        label='博客园', login_url='https://account.cnblogs.com/signin',
+        editor_url='https://i.cnblogs.com/posts/edit',
+        title=['#post-title', 'input[placeholder*="标题"]', 'input[aria-label*="标题"]'],
+        body=['textarea#md-editor', '.CodeMirror textarea', 'textarea[placeholder*="正文"]',
+              'div[contenteditable="true"]', '.ProseMirror'],
+        save=['发布文章', '发布', '保存草稿'], success=['发布成功', '文章发布成功', '保存成功']),
     'xiaohongshu': dict(
         label='小红书', login_url='https://creator.xiaohongshu.com/login',
         editor_url='https://creator.xiaohongshu.com/publish/publish?source=official&target=article',

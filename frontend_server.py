@@ -60,7 +60,16 @@ def _allowed_file(name):
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self,*args,**kwargs):super().__init__(*args,directory=str(ROOT),**kwargs)
     def do_GET(self):
-        parsed=urlsplit(self.path);name=_public_name(self.path) or ''
+        parsed=urlsplit(self.path);public_name=_public_name(self.path)
+        if public_name is None:
+            self.send_error(404);return
+        name=public_name
+        # The project dashboard opens the service root (http://127.0.0.1:4173/).
+        # Serve the unified workspace there instead of letting the allowlist turn
+        # the empty path into a misleading 404.
+        if not name:
+            self.path='/workspace.html' + (('?' + parsed.query) if parsed.query else '')
+            name='workspace.html'
         if name in ROUTES:
             query=parse_qs(parsed.query);args={}
             if name!='dashboard.html' and query.get('project'):args['project']=query['project'][0]
@@ -75,7 +84,13 @@ class Handler(SimpleHTTPRequestHandler):
         if _allowed_file(name) is None:self.send_error(404);return
         super().do_GET()
     def do_HEAD(self):
-        name=_public_name(self.path) or ''
+        parsed=urlsplit(self.path);public_name=_public_name(self.path)
+        if public_name is None:
+            self.send_error(404);return
+        name=public_name
+        if not name:
+            self.path='/workspace.html' + (('?' + parsed.query) if parsed.query else '')
+            name='workspace.html'
         if name == 'geo-config.js':
             payload = (f'window.GEO_API_URL = {json.dumps(API_URL)};\n').encode('utf-8')
             self.send_response(200); self.send_header('Content-Type', 'application/javascript; charset=utf-8')

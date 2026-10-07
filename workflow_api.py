@@ -15,7 +15,9 @@ import content_llm_config
 import source_materials as materials
 import publish_adapters as adapters
 import platform_login
-from diagnosis_config import DIAGNOSIS_PLATFORMS, PUBLISH_PLATFORMS, suggest_questions
+from diagnosis_config import (DIAGNOSIS_PLATFORMS, PUBLISH_PLATFORMS,
+                              check_question_quality)
+from diagnosis_question_llm import generate_questions
 from diagnosis_runs import create_frozen_run, verify_frozen_run
 from process_guard import ProcessGuard
 from runtime_config import FRONTEND_ORIGINS
@@ -179,11 +181,15 @@ def delete_project(slug: str,payload: Confirmation):
 @app.put('/api/projects/{slug}/profile')
 def save_profile(slug: str,payload: ProfileInput):
     revision=store.save_profile(slug,payload.profile,payload.questions,payload.platforms,payload.revision)
-    return {'revision':revision,'message':'已保存'}
+    quality = check_question_quality(payload.profile, payload.questions)
+    return {'revision':revision,'message':'已保存','quality':quality}
 
 @app.post('/api/projects/{slug}/question-suggestions')
 def questions(slug: str):
-    return {'questions':suggest_questions(store.get_profile(slug)['profile'])}
+    profile = store.get_profile(slug)['profile']
+    result = generate_questions(profile)
+    # 返回门禁结果和脱敏生成元数据，让配置页明确展示可编辑草稿及 fallback 状态。
+    return result
 
 @app.post('/api/projects/{slug}/runs',status_code=201)
 def freeze(slug: str,payload: Confirmation):

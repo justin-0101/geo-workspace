@@ -31,7 +31,7 @@ ENGINE_FILES = ('geo_driver.py', 'geo_run.py', 'render-report.py',
 REQUIRED_SOURCE_FILES = (
     'cover_gen.py', 'browser_paths.py', 'process_identity.py', 'runtime_config.py',
     'requirements.txt', 'install.ps1', 'check_install.py', 'start.py', 'stop.py',
-    'frontend_server.py',
+    'frontend_server.py', 'diagnosis_question_llm.py',
     # Static assets referenced by workspace.html/workspace.css.
     'workspace.html', 'workspace.css', 'workspace.js',
     'fonts/geist-latin-wght-normal.woff2',

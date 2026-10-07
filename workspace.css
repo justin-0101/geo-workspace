@@ -84,7 +84,7 @@ dialog::backdrop{background:#14212b66}
 dialog footer{display:flex;justify-content:end;gap:10px;margin-top:24px}
 #modal-error{color:var(--red)}
 pre{white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:13px;line-height:1.7}
-.question{display:grid;grid-template-columns:45px 1fr;gap:12px;margin-bottom:16px}.question textarea{width:100%}
+.question{display:grid;grid-template-columns:145px 1fr;gap:12px;margin-bottom:16px}.question textarea{width:100%}.question span{font-weight:600}.question span small{display:block;margin-top:5px;color:var(--muted-ink);font-size:12px;font-weight:400;line-height:1.4}.question-quality{margin:12px 0 16px;padding:10px 14px;border:1px solid var(--line-input);border-radius:8px;color:var(--muted-ink);font-size:13px;line-height:1.6}.question-quality strong{color:var(--ink)}.question-quality ul{margin:5px 0 0;padding-left:20px;color:var(--red)}
 @media(max-width:760px){.shell{grid-template-columns:145px 1fr}.shell>aside{padding:20px 7px}.brand{font-size:15px;margin-left:5px}nav a{padding:10px}#view{padding:20px 16px}.split,.form-grid{grid-template-columns:1fr}header{padding:17px 16px}.page-head{align-items:start;flex-wrap:wrap}}/* 项目概览：沿用第一版图文设计语言（KPI 卡 + 折线图 + 环形评分 + 条形分布） */
 /* 数字统一等宽：KPI、计数、评分、条形数值 */
 .hero-main strong,.hero-grid>div strong,.bar-count,.score-value strong,.score-value small{font-variant-numeric:tabular-nums}
@@ -661,6 +661,9 @@ label.pick-title{display:block;margin:0;font-weight:600;line-height:1.5;cursor:p
 .chip-legend i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:var(--sp-2)}
 .chip-legend i.warn{background:var(--orange-mark)}
 .chip-legend i.grey{background:var(--line-input)}
+/* 平台说明必须留在卡片内；长中文与加粗片段都允许在窄栏中换行。 */
+.chip-note{min-width:0;max-width:100%;margin:0 var(--sp-6) var(--sp-5);font-size:var(--fs-meta);line-height:1.65;color:var(--muted-ink);overflow-wrap:anywhere;word-break:break-word}
+.chip-note strong{color:var(--ink)}
 
 /* 提交条：不再用蓝色顶边，靠阴影浮起来表现「它是浮层」，并加毛玻璃（借 liquefy-ui 的玻璃顶栅） */
 .submit-bar{position:sticky;bottom:0;z-index:60;display:flex;justify-content:space-between;align-items:center;gap:var(--sp-6);flex-wrap:wrap;

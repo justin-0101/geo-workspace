@@ -46,6 +46,12 @@ PLATFORM_SPECS = (
                  '无官方发文接口，且需要封面图'),
     PlatformSpec('sohu', '搜狐号', 'browser', ('title', 'body'), (), '搜狐号后台', '无官方发文接口'),
     PlatformSpec('dayu', '大鱼号', 'browser', ('title', 'body'), (), '大鱼号后台', '无官方发文接口'),
+    PlatformSpec('cnblogs', '博客园', 'browser', ('title', 'body'), (),
+                 'https://i.cnblogs.com/posts/edit', '无官方发文接口，需先登录博客园'),
+    # 列举网是分类信息平台，发布前还需要城市/分类/联系方式等字段，
+    # 不能把通用文章标题和正文误当成完整信息直接自动提交。
+    PlatformSpec('lieju', '列举网（广州）', 'manual', ('title', 'body'), (),
+                 'https://post.lieju.com/', '分类信息平台，需按城市和分类人工填写并发布'),
     PlatformSpec('official_site', '官网', 'manual', ('title', 'body'), (), '官网 CMS', '由官网后台人工发布'),
     PlatformSpec('baike', '百度百科', 'manual', ('title', 'body', 'facts'), (), '百科词条编辑',
                  '只有合作渠道，无通用编辑接口'),

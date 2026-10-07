@@ -28,6 +28,18 @@ class FrontendAllowlistTests(unittest.TestCase):
             urllib.request.urlopen(request, timeout=3)
         self.assertEqual(context.exception.code, 404)
 
+    def test_service_root_serves_workspace(self):
+        response = urllib.request.urlopen(self.base + '/', timeout=3)
+        self.assertEqual(response.status, 200)
+        self.assertTrue(response.url.endswith('/'))
+        self.assertIn(b'<title>', response.read())
+
+    def test_service_root_supports_head(self):
+        request = urllib.request.Request(self.base + '/', method='HEAD')
+        response = urllib.request.urlopen(request, timeout=3)
+        self.assertEqual(response.status, 200)
+        self.assertTrue(response.headers.get('Content-Length'))
+
     def test_encoded_parent_path_cannot_escape_fonts_on_get(self):
         self.assert_not_found('GET', '/fonts/%2e%2e/README.md')
 

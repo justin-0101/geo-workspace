@@ -278,11 +278,11 @@ def main():
                     expect(page.locator('#tabs a')).to_have_count(2)
                     expect(page.locator('#col-assets')).to_contain_text('还没有已审核内容')
                     expect(page.locator('#submitbar')).to_contain_text('还没有选内容或平台')
-                    # 发布平台契约表：十个平台都要有接入位，缺一就是能力声明少了。
-                    expect(page.locator('[name="pick-platform"]')).to_have_count(10)
-                    # 平台明细：一行一个平台（与平台契约表一致，共 10 个）
+                    # 发布平台契约表：十二个平台都要有接入位，缺一就是能力声明少了。
+                    expect(page.locator('[name="pick-platform"]')).to_have_count(12)
+                    # 平台明细：一行一个平台（与平台契约表一致，共 12 个）
                     expect(page.locator('#module details summary')).to_contain_text('平台明细')
-                    expect(page.locator('#login-rows tr')).to_have_count(10)
+                    expect(page.locator('#login-rows tr')).to_have_count(12)
                     expect(page.locator('#login-rows')).to_contain_text('还没有检测过登录态')
                     # 把识别结果写进状态文件再刷新：界面要读出已登录。
                     # （真实浏览器里的登录识别属于实机验证，这里只验界面与接口的契约。）

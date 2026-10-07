@@ -99,7 +99,8 @@ def status():
         'source': source,
         'presets': [dict(item) for item in PRESETS],
         # 只说明存放位置与优先级，不回显密钥
-        'note': '密钥只保存在本机数据库；环境变量 GEO_CONTENT_LLM_* 优先于这里的设置。',
+        'note': ('密钥只保存在本机数据库；环境变量 GEO_CONTENT_LLM_* 优先于这里的设置。'
+                 '此内容模型配置也可供诊断问题候选生成复用；诊断问题仍会经过本地门禁和人工确认。'),
     }
 
 

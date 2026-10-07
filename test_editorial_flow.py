@@ -257,12 +257,13 @@ class EditorialTests(APITests):
     def test_platform_adapter_registry_covers_all_platforms(self):
         import publish_adapters as adapters
         caps=adapters.capabilities()
-        self.assertEqual(len(caps),10)
+        self.assertEqual(len(caps),12)
         modes={c['id']:c['mode'] for c in caps}
         self.assertEqual(modes['wechat_mp'],'api')
         self.assertEqual(modes['baike'],'manual')
         self.assertEqual(modes['official_site'],'manual')
-        for pid in ['zhihu','baijia','toutiao','csdn','xiaohongshu','sohu','dayu']:
+        self.assertEqual(modes['lieju'],'manual')
+        for pid in ['zhihu','baijia','toutiao','csdn','xiaohongshu','sohu','dayu','cnblogs']:
             self.assertEqual(modes[pid],'browser')
 
     def test_publish_requires_confirmation(self):

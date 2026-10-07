@@ -38,7 +38,7 @@ class WorkspaceTests(unittest.TestCase):
         questions = suggest_questions(self.profile)
         config = freeze_config(self.profile, questions, [p['id'] for p in DIAGNOSIS_PLATFORMS])
         self.assertEqual(config['scope']['expected_tasks'], 32)
-        self.assertEqual(len({p['id'] for p in PUBLISH_PLATFORMS}), 10)
+        self.assertEqual(len({p['id'] for p in PUBLISH_PLATFORMS}), 12)
         with self.assertRaises(ValueError): freeze_config(self.profile, questions, ['wechat_mp'])
         questions[0]['prompt'] += '测试主体'
         with self.assertRaises(ValueError): freeze_config(self.profile, questions, ['deepseek'])

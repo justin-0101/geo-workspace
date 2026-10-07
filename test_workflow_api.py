@@ -45,7 +45,7 @@ class APITests(unittest.TestCase):
     def test_empty_workbench_platforms(self):
         self.assertEqual(self.client.get('/api/workbench').json(),{'pending':[],'events':[]})
         data=self.client.get('/api/platforms').json()
-        self.assertEqual(len(data['diagnosis']),4);self.assertEqual(len(data['publication']),10)
+        self.assertEqual(len(data['diagnosis']),4);self.assertEqual(len(data['publication']),12)
 
     def test_login_state_snapshot_covers_browser_platforms(self):
         from unittest.mock import patch
