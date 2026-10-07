@@ -2,6 +2,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from http.server import ThreadingHTTPServer
 
@@ -48,6 +49,12 @@ class FrontendAllowlistTests(unittest.TestCase):
 
     def test_encoded_backslash_is_not_a_path_separator_bypass(self):
         self.assert_not_found('GET', '/fonts/%2e%2e%5cREADME.md')
+
+    def test_question_generation_uses_extended_timeout_and_blocks_duplicates(self):
+        source = (Path(__file__).with_name('workspace.js')).read_text(encoding='utf-8')
+        self.assertIn('const QUESTION_SUGGESTION_TIMEOUT = 150000;', source)
+        self.assertIn("api(base+'/question-suggestions','POST',{},QUESTION_SUGGESTION_TIMEOUT)", source)
+        self.assertIn("button.disabled=true", source)
 
 
 if __name__ == '__main__':
