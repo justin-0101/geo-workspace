@@ -37,7 +37,7 @@ def delete_asset(slug, identity):
         require(c,'editorial_assets',slug,identity)
         c.execute('DELETE FROM editorial_assets WHERE id=?',(identity,))
         if asset.get('action_id'):
-            # 删掉稿件后，对应的改善任务应该回到待处理，而不是停在 doing/done。
+            # 删掉稿件后，对应的优化清单应该回到待处理，而不是停在 doing/done。
             c.execute("UPDATE improvement_items SET status='todo' WHERE id=?",(asset['action_id'],))
         store.record_event(c,slug,'content_deleted',
                            f"删除内容《{(asset.get('title') or '')[:40]}》（素材 {sources} 个，发布记录 {jobs} 条）")
@@ -139,7 +139,7 @@ def derive(slug, run_id):
             result=c.execute('INSERT OR IGNORE INTO improvement_items(id,project_slug,run_id,task_id,title,description,created_at) VALUES(?,?,?,?,?,?,?)',
                        (uuid.uuid4().hex,slug,run_id,qid,title,description,store.now()))
             count+=result.rowcount
-        store.record_event(c,slug,'improvements_derived',f'生成 {count} 条按问题聚合的改善任务')
+        store.record_event(c,slug,'improvements_derived',f'生成 {count} 条优化项（按问题聚合）')
     return {'created':count,'topics':len(grouped)}
 
 
@@ -252,10 +252,10 @@ def create_asset(slug, action_id):
         c.execute('''INSERT INTO editorial_assets
           (id,project_slug,action_id,source,audience,objective,title,body,source_bundle_json,created_at,updated_at)
           VALUES(?,?,?,'diagnosis',?,?,?,?,?,?,?)''',
-          (identity,slug,action_id,str(profile.get('audience') or '').strip(),action['description'],title,
+          (identity,slug,action_id,str(profile.get('audience') or '').strip(),store.reader_objective(bundle.get('question') or ''),title,
            build_outline(title,bundle.get('question') or ''),json.dumps(bundle,ensure_ascii=False),timestamp,timestamp))
         c.execute("UPDATE improvement_items SET status='doing' WHERE id=?",(action_id,))
-        store.record_event(c,slug,'content_created','由改善任务创建内容任务书')
+        store.record_event(c,slug,'content_created','由优化清单创建内容任务书')
     return {'id':identity}
 
 

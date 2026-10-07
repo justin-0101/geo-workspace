@@ -154,6 +154,36 @@ def migrate():
                           ('adapter_note', "TEXT NOT NULL DEFAULT ''")):
             if name not in job_cols:
                 c.execute(f'ALTER TABLE publishing_jobs ADD COLUMN {name} {ddl}')
+        # 修数据：诊断优化清单的内部话术曾被原样复制进 objective（该字段会作为 brief.objective
+        # 送进内容模型）。这里只修「症状可识别」的旧行，并以 source_bundle 里当时的提问重算；
+        # 重算不出来就清空（质量门禁会提示「未填写写作目标」，比留着内部话术安全）。
+        # 幂等：修完不再有行匹配该模式，重跑 migrate() 不会重复动数据。
+        leaked = c.execute("""SELECT id, source_bundle_json FROM editorial_assets
+            WHERE objective LIKE '诊断问题%个有效观测中未自然提及主体%'""").fetchall()
+        for row in leaked:
+            try:
+                question = json.loads(row['source_bundle_json'] or '{}').get('question')
+            except (TypeError, ValueError):
+                question = ''
+            c.execute('UPDATE editorial_assets SET objective=? WHERE id=?',
+                      (reader_objective(question), row['id']))
+
+
+def reader_objective(question=''):
+    """内容稿件的 objective 只能是「给读者的写作目标」。
+
+    真实事故：editorial_flow.create_asset 把 improvement_items.description——「诊断问题 Q05 在
+    2 个有效观测中未自然提及主体。请基于企业可核验资料补充内容。涉及平台：deepseek、metaso。」
+    ——原样写进 objective。而 objective 会作为 brief.objective 送进内容模型，等于把内部过程信息
+    （诊断项、观测数、平台名）塞进了稿件字段。内部说明仍留在优化清单的 description 里，
+    source_bundle 也带 observations，这里丢掉不丢信息。
+
+    问题为空时宁可为空（质量门禁会提示「未填写写作目标」），也不替编辑臆造写作目标。
+    放在 store 层是因为建稿（editorial_flow）和修数据（migrate）两处都要用同一套措辞，
+    分开写两份迟早会漂。
+    """
+    text = str(question or '').strip().rstrip('？?。')
+    return f'回答读者提出的问题：{text}' if text else ''
 
 
 def record_event(c, slug, kind, title):

@@ -115,7 +115,7 @@ def main():
                     checks.append('completed run links to its diagnosis report')
 
             page.get_by_role('link', name='优化清单', exact=True).click()
-            expect_page_lead('优化清单', '把诊断结论转成可执行的改善任务。')
+            expect_page_lead('优化清单', '把诊断结论转成可执行的优化项。')
             expect(page.locator('#scope')).to_be_visible()
             # 优化清单按诊断批次折叠：默认全部收起，点批次名称才展开该批次的任务
             batches = api('/api/projects/' + projects[0]['slug'] + '/editorial/actions')['batches'] if projects else []

@@ -130,6 +130,9 @@ def process_command_line(pid: int):
 
     # WMI/CIM is the standard supported Windows interface for command lines.
     # A missing/blocked PowerShell is intentionally a safe no-op at stop time.
+    # The budget must clear a cold PowerShell start: measured 3.9 s on this machine,
+    # and the previous 3 s budget timed out on every call, which silently turned every
+    # stop into "unverified, left alone".
     script = (
         "$p=Get-CimInstance Win32_Process -Filter 'ProcessId = %d';"
         "if ($p) {$p.CommandLine}" % pid
@@ -137,7 +140,7 @@ def process_command_line(pid: int):
     try:
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, text=True, timeout=3, check=False)
+            capture_output=True, text=True, timeout=15, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     line = result.stdout.strip()

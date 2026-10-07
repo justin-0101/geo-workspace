@@ -16,7 +16,6 @@ import content_llm_config
 
 
 PLACEHOLDER_RE = re.compile(r'待补充|待填写|TODO|placeholder|lorem ipsum|[【\[]待核实[】\]]', re.I)
-SOURCE_RE = re.compile(r'https?://|(?:来源|出处|文件|报告|官方页面)\s*[:：]', re.I)
 INSTRUCTION_TITLE_RE = re.compile(r'^(?:待填写[:：]?\s*)?补充问题相关的事实与内容[:：]?', re.I)
 
 #: 从素材原文里挑“像事实”的一行：含数字、年份、资质、交付类关键词。
@@ -243,7 +242,6 @@ def quality_check(asset):
     """Return blocking errors and non-blocking warnings for the current asset version."""
     title = _text(asset.get('title'))
     body = _text(asset.get('body'))
-    facts = _text(asset.get('facts'))
     summary = _text(asset.get('summary'))
     audience = _text(asset.get('audience'))
     objective = _text(asset.get('objective'))
@@ -265,10 +263,8 @@ def quality_check(asset):
         actual = _plain_length(body)
         if actual < minimum:
             errors.append(f'正文有效长度约 {actual} 字，低于当前渠道最低要求 {minimum} 字')
-    if not facts:
-        errors.append('事实依据与来源不能为空（可在内容生产里上传素材或添加网址，生成时自动带出来）')
-    elif not SOURCE_RE.search(facts):
-        errors.append('事实依据需要包含链接，或使用“来源：/出处：/文件：/报告：”标明出处')
+    # 事实依据与来源**不是**门禁条件：有些内容本身就是事实，不要求必须提供出处。
+    # （这里原先会因「为空」或「没有链接 / 来源： / 出处： / 文件： / 报告： 标记」拦住审核与发布。）
 
     if not audience:
         warnings.append('未填写目标读者')
@@ -493,7 +489,7 @@ def local_generate(asset, bundle):
                      f'从 {overview.get("rows", 0)} 行里整理出 '
                      f'{overview.get("group_total") or len(overview.get("groups") or [])} 个分组。')
     else:
-        notes.append('本次没有任何可用素材，正文没有事实依据，无法审核与发布。')
+        notes.append('本次没有任何可用素材，正文里没有素材依据；事实依据与来源不是审核门禁条件，但正文的说法仍需人工确认。')
     notes.append('成稿还需要的材料：一句话产品定位、适用客户与规模、与替代方案的差异、'
                  '交付周期、报价口径、可公开案例、联系方式。')
     warnings = ['本稿是素材整理稿，不是可发布的成稿；主体能力、案例、报价和效果仍需人工核验。']
@@ -517,6 +513,18 @@ def _extract_json(text):
         if not match:
             raise ValueError('内容模型没有返回可解析的 JSON')
         return json.loads(match.group(0))
+
+
+def _request_timeout():
+    """内容模型读超时（秒）。
+
+    素材多、目标篇幅长时 90 秒不够：实测一次完整成稿会在 90 秒处读超时（失败前不写库，
+    所以不会留下半成品）。默认 300 秒，可用 `GEO_CONTENT_LLM_TIMEOUT` 覆盖。
+    """
+    try:
+        return max(30, int(os.environ.get('GEO_CONTENT_LLM_TIMEOUT') or 300))
+    except (TypeError, ValueError):
+        return 300
 
 
 def openai_generate(asset, bundle):
@@ -586,7 +594,7 @@ def openai_generate(asset, bundle):
         headers['Authorization'] = 'Bearer ' + key
     req = request.Request(_endpoint(base), data=payload, headers=headers, method='POST')
     try:
-        with request.urlopen(req, timeout=90) as response:
+        with request.urlopen(req, timeout=_request_timeout()) as response:
             data = json.loads(response.read().decode('utf8'))
     except error.HTTPError as exc:
         detail = exc.read().decode('utf8', errors='replace')[:500]

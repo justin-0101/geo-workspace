@@ -102,15 +102,18 @@ class QualityGateTests(IsolatedStore):
         # 小红书门槛更低，同一段正文在小红书渠道可以通过长度检查
         self.assertTrue(generation.quality_check(dict(ASSET, channel='小红书', body=short))['passed'])
 
-    def test_facts_need_a_traceable_source(self):
-        cases = ('刚刚发生的', '行业普遍如此', '参考同类项目经验')
-        for facts in cases:
-            report = generation.quality_check(dict(ASSET, body='内容' * 300, facts=facts))
-            self.assertFalse(report['passed'], facts)
-        for facts in ('来源：https://example.com/a', '出处：产品说明书第 3 页',
+    def test_facts_text_never_blocks_the_gate(self):
+        """事实依据与来源不设为门禁条件：有些内容本身就是事实，不要求必须提供出处。
+
+        （这里原先要求 facts 非空、且出现链接或「来源：/出处：/文件：/报告：」标记，否则拦住审核与发布。）
+        """
+        for facts in ('', '刚刚发生的', '行业普遍如此', '参考同类项目经验',
+                      '来源：https://example.com/a', '出处：产品说明书第 3 页',
                       '文件：客户提供的验收报告', '报告：QUALITY_REPORT.md 第 2 节'):
-            report = generation.quality_check(dict(ASSET, body='内容' * 300, facts=facts))
-            self.assertTrue(report['passed'], (facts, report['errors']))
+            with self.subTest(facts=facts):
+                report = generation.quality_check(dict(ASSET, body='内容' * 300, facts=facts))
+                self.assertEqual([e for e in report['errors'] if '事实依据' in e], [], report['errors'])
+                self.assertTrue(report['passed'], (facts, report['errors']))
 
     def test_warnings_do_not_block(self):
         report = generation.quality_check(dict(ASSET, body='内容' * 300, audience='', objective='',
@@ -184,7 +187,19 @@ class LocalGeneratorTests(IsolatedStore):
         self.assertIn('本稿没有素材依据', body)
         for invented in ('已服务', '成功案例', '市场份额', '行业第一', '通过认证'):
             self.assertNotIn(invented, body)
-        self.assertFalse(generation.quality_check(dict(ASSET, **result))['passed'])
+        # 这份整理稿仍然过不了门禁，但原因**不再是**「事实依据为空」，而是正文长度不达渠道下限。
+        # （写清楚原因：否则门禁规则一变，这里会静默变成一句没意义的断言。）
+        report = generation.quality_check(dict(ASSET, **result))
+        self.assertFalse(report['passed'])
+        self.assertTrue(any('低于当前渠道最低要求' in e for e in report['errors']), report['errors'])
+        self.assertEqual([e for e in report['errors'] if '事实依据' in e], [], report['errors'])
+
+    def test_empty_facts_is_not_a_quality_error(self):
+        """事实依据与来源不设为门禁条件：有些内容本身就是事实，不要求必须提供出处。"""
+        for facts in ('', '刚刚发生的'):
+            with self.subTest(facts=facts):
+                report = generation.quality_check(dict(ASSET, body='内容' * 300, facts=facts))
+                self.assertEqual([e for e in report['errors'] if '事实依据' in e], [], report['errors'])
 
     def test_official_pages_reach_the_body_without_operator_notes(self):
         result = generation.local_generate(dict(ASSET, facts=''), RICH_BUNDLE)

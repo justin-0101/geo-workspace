@@ -88,7 +88,7 @@ def main():
                     (run_path/'evidence/test.txt').write_text('SYNTHETIC BROWSER TEST',encoding='utf8')
                     obs=dict(task_id='Q01_deepseek_01',status='success',response_text='SYNTHETIC BROWSER TEST',input_prompt='测试问题',evidence_files=['evidence/test.txt'],classification={'brand_mention':'no'})
                     (run_path/'observations.jsonl').write_text(json.dumps(obs)+'\n',encoding='utf8')
-                    page.reload();page.get_by_role('button',name='生成改善任务',exact=True).click()
+                    page.reload();page.get_by_role('button',name='生成优化清单',exact=True).click()
                     page.get_by_role('button',name='编写内容',exact=True).click()
                     # 诊断来源的内容必须带上证据包：问题原文、观测摘要与证据文件索引
                     expect(page.get_by_role('heading',name='写作任务书',exact=True)).to_be_visible()

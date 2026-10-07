@@ -70,6 +70,10 @@ class EditorialTests(APITests):
         self.assertFalse(e['generated'])
         self.assertIsNone(e['latest'])
 
+    def _objective(self, aid):
+        with store.connection() as c:
+            return c.execute('SELECT objective FROM editorial_assets WHERE id=?',(aid,)).fetchone()['objective']
+
     def _asset(self, base, aid):
         return next(x for x in self.client.get(base+'/editorial/content').json()['items'] if x['id']==aid)
 
@@ -166,6 +170,22 @@ class EditorialTests(APITests):
         self.assertEqual(len(bundle['observations']),1)
         self.assertEqual(bundle['observations'][0]['fact_status'],'unverified-model-response')
 
+    def test_diagnosis_objective_is_reader_facing_not_an_internal_note(self):
+        """回归：诊断优化清单的内部话术曾被原样写进 objective。
+
+        objective 会作为 brief.objective 送进内容模型，内部过程信息（诊断项、观测数、平台名）
+        不得进入稿件字段，只能留在优化清单的 description 里。
+        """
+        slug,base,aid=self.seed()
+        with store.connection() as c:
+            objective=c.execute('SELECT objective FROM editorial_assets WHERE id=?',(aid,)).fetchone()['objective']
+            action=dict(c.execute('SELECT description FROM improvement_items WHERE id=(SELECT action_id FROM editorial_assets WHERE id=?)',(aid,)).fetchone())
+        self.assertIn('有效观测',action['description'])        # 内部话术仍在优化清单里，没有丢
+        self.assertIn('涉及平台',action['description'])
+        self.assertIn('测试问题',objective)                    # 写作目标只回答读者的问题
+        for banned in ('诊断问题','有效观测','未自然提及','涉及平台','deepseek'):
+            self.assertNotIn(banned,objective,f'objective 里出现了内部话术：{objective}')
+
     def test_actions_list_keeps_every_batch_separately(self):
         """优化清单按批次分组：新批次的清单不会覆盖旧批次，两批各自保留。"""
         slug,base,aid=self.seed()
@@ -173,7 +193,7 @@ class EditorialTests(APITests):
         d=self.client.get(base+'/editorial/actions').json()
         self.assertEqual([b['id'] for b in d['batches']],[first])
         self.assertEqual(d['batches'][0]['counts'],{'total':1,'todo':0,'doing':1,'done':0})
-        # 第二批：冻结并完成后，即使还没生成改善任务，也必须出现在批次列表里
+        # 第二批：冻结并完成后，即使还没生成优化清单，也必须出现在批次列表里
         profile=dict(canonical_name='测试项目',business='设备维护',region='广州',audience='工厂',aliases=[],official_pages=[],no_official_web_presence=True)
         revision=self.client.get(base).json()['revision']
         self.assertEqual(self.client.put(base+'/profile',json=dict(profile=profile,questions=suggest_questions(profile),platforms=['deepseek'],revision=revision)).status_code,200)
@@ -205,7 +225,7 @@ class EditorialTests(APITests):
         # 诊断回答只能作为缺口线索，不能自动变成已核验事实
         self.assertEqual(bundle['verified_facts'],'')
 
-    def test_quality_gate_blocks_instruction_title_short_body_and_fake_source(self):
+    def test_quality_gate_blocks_instruction_title_and_short_body(self):
         slug,base,aid=self.seed()
         self.client.put(base+'/content/'+aid,json={'title':'待填写：补充问题相关的事实与内容：测试问题','body':LONG_BODY,'facts':FACTS,'revision':1})
         r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True})
@@ -213,12 +233,25 @@ class EditorialTests(APITests):
         self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':'刚刚发生的','facts':FACTS,'revision':2})
         r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':3,'confirm':True})
         self.assertEqual(r.status_code,409); self.assertIn('低于当前渠道最低要求',r.json()['detail'])
+        # 事实依据与来源不再是门禁条件：写「刚刚发生的」这种不成出处的内容也能过审
         self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':LONG_BODY,'facts':'刚刚发生的','revision':3})
-        r=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':4,'confirm':True})
-        self.assertEqual(r.status_code,409); self.assertIn('标明出处',r.json()['detail'])
-        # 四项都补齐后才能过审
-        self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':LONG_BODY,'facts':FACTS,'revision':4})
-        self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':5,'confirm':True}).status_code,200)
+        self.assertEqual(self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':4,'confirm':True}).status_code,200)
+
+    def test_review_passes_without_any_facts_or_source(self):
+        """事实依据与来源不设为门禁条件：有些内容本身就是事实，不要求必须提供出处。
+
+        这里锁住三处：
+        - 审核门禁（review_asset）
+        - 发布前重查（publish_now）
+        - 直接调 quality_check
+        """
+        slug,base,aid=self.seed()
+        import content_generation as generation
+        self.assertNotIn('事实依据', ' '.join(
+            generation.quality_check({'title':'正常标题','body':LONG_BODY,'facts':''})['errors']))
+        self.client.put(base+'/content/'+aid,json={'title':'正常标题','body':LONG_BODY,'facts':'','revision':1})
+        done=self.client.post(base+'/content/'+aid+'/review',json={'reviewer':'复核人','revision':2,'confirm':True})
+        self.assertEqual(done.status_code,200, done.text)
 
     def test_short_body_passes_after_channel_is_set(self):
         slug,base,aid=self.seed()
@@ -254,6 +287,38 @@ class EditorialTests(APITests):
         self.assertEqual(asset['target_length'],1200)
         self.assertEqual(asset['revision'],2)
         self.assertEqual(asset['status'],'draft')
+
+    def test_migration_repairs_objective_leaked_from_the_diagnosis_note(self):
+        """回归：旧数据的 objective 存着诊断内部话术，migrate() 要用当时的提问重算。
+
+        代码修复只影响新建资产；已经落库的行必须靠迁移修，否则下次重新生成
+        还会把内部话术作为 brief.objective 送进内容模型。
+        """
+        slug,base,aid=self.seed()
+        leaked='诊断问题 Q01 在 2 个有效观测中未自然提及主体。请基于企业可核验资料补充内容。涉及平台：deepseek。'
+        with store.connection() as c:
+            c.execute('UPDATE editorial_assets SET objective=? WHERE id=?',(leaked,aid))
+        store.migrate()
+        self.assertEqual(self._objective(aid),'回答读者提出的问题：测试问题')
+        store.migrate()                                                      # 幂等：二次执行不再改写
+        self.assertEqual(self._objective(aid),'回答读者提出的问题：测试问题')
+
+    def test_migration_clears_leaked_objective_when_question_is_unavailable(self):
+        """重算不出提问时宁可清空，也不能留着内部话术。"""
+        slug,base,aid=self.seed()
+        leaked='诊断问题 Q01 在 2 个有效观测中未自然提及主体。请基于企业可核验资料补充内容。涉及平台：deepseek。'
+        with store.connection() as c:
+            c.execute('UPDATE editorial_assets SET objective=?,source_bundle_json=? WHERE id=?',(leaked,'{}',aid))
+        store.migrate()
+        self.assertEqual(self._objective(aid),'')
+
+    def test_migration_leaves_human_written_objective_alone(self):
+        """不能误伤：人工填写的写作目标不匹配泄漏特征，迁移必须原样保留。"""
+        slug,base,aid=self.seed()
+        with store.connection() as c:
+            c.execute('UPDATE editorial_assets SET objective=? WHERE id=?',('帮助读者建立可核验的选型框架',aid))
+        store.migrate()
+        self.assertEqual(self._objective(aid),'帮助读者建立可核验的选型框架')
 
     def test_review_marks_linked_action_done(self):
         slug,base,aid=self.seed()

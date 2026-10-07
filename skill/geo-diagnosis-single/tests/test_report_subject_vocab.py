@@ -106,6 +106,19 @@ class SubjectFactTests(unittest.TestCase):
         self.assertEqual(facts["name"], "示例智能装备（深圳）有限公司")
         self.assertEqual(facts["business"], "设备资产管理系统（EAM系统）")
 
+    def test_comparison_question_is_not_stolen_by_the_sequential_branch(self):
+        """分支顺序：Q08/对比是「题目身份」规则，不能被通用关键词「流程」截走。
+
+        潜在缺口：对比题里常见「实施流程/步骤有什么不同」，若新分支排在上面，
+        Q08 会拿到「…流程说明…」而不是对比标题。
+        """
+        self.assertEqual(
+            rr.suggested_asset_title("Q08", "两种方案对比，完成周期和实施流程有什么不同？", "设备资产管理系统"),
+            "与同类方案的对比：利弊分析与决策建议")
+        # 对应方向：非对比的顺序题仍然落到新分支
+        self.assertIn("流程说明", rr.suggested_asset_title(
+            "Q05", "从签约到交付一般流程是怎么安排的？", "设备资产管理系统"))
+
     def test_titles_never_hardcode_an_industry(self):
         for qid, prompt in EAM_PROMPTS.items():
             title = rr.suggested_asset_title(qid, prompt, "设备资产管理系统")
@@ -117,6 +130,31 @@ class SubjectFactTests(unittest.TestCase):
         title = rr.suggested_asset_title("Q02", EAM_PROMPTS["Q02"], "")
         self.assertNotIn("代账", title)
         self.assertIn("费用", title)
+
+    def test_sequential_question_gets_a_title_instead_of_the_fallback(self):
+        """真实缺口：Q05「一般流程是怎么安排的？」命不中任何规则，落了兜底文案。
+
+        事故表现：report/optimization-plan.md 里 Q03/Q04/Q05 三行都写成
+        「围绕 Q0X 的高意图问题解答页」——看起来像占位符，不像内容标题。
+        """
+        title = rr.suggested_asset_title(
+            "Q05", "想把公司注册、记账、报税都交给一家代办机构一条龙搞定，一般流程是怎么安排的？",
+            "代理记账、报税、公司注册")
+        self.assertNotIn("围绕", title)
+        self.assertIn("流程", title)
+        # 新分支同样只能用中性措辞：不得引入行业或渠道假设
+        for banned in ("代账", "财税", "税务", "会计", "本地服务商", "全国平台", "自聘"):
+            self.assertNotIn(banned, title, f"{banned} 被写进了标题：{title}")
+
+    def test_sequential_branch_does_not_steal_risk_questions(self):
+        """顺序不能反：「常见实施风险有哪些，如何规避？」必须仍然走风险分支。
+
+        风险分支的文案是「常见问题与处理流程：…」（不带「风险」二字），
+        所以用「流程说明」来区分两个分支，而不是用「风险」。
+        """
+        title = rr.suggested_asset_title("Q04", "工厂采用设备资产管理系统时，常见实施风险有哪些，如何规避？", "设备资产管理系统")
+        self.assertIn("常见问题与处理流程", title)
+        self.assertNotIn("流程说明", title)
 
 
 class TextCheckTests(unittest.TestCase):

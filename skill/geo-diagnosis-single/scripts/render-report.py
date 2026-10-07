@@ -313,8 +313,13 @@ def suggested_asset_title(question_id, prompt, subject=""):
         return "自行处理与委托外部团队：不同阶段的选择边界"
     if any(k in text for k in ("风险", "异常", "注销", "变更", "合规")):
         return f"{topic}常见问题与处理流程：原因、影响与整改方案"
+    # Q08/对比是「题目身份」规则，必须排在通用关键词规则之前，不能被下面的「流程」分支截走。
     if question_id == "Q08" or "对比" in text or "利弊" in text or "比较" in text:
         return "与同类方案的对比：利弊分析与决策建议"
+    # 顺序问「怎么做」的问题（真实缺口：Q05「一般流程是怎么安排的？」命不中任何规则，
+    # 落到兜底文案「围绕 Q05 的高意图问题解答页」）。措辞只用中性词，不引入行业假设。
+    if any(k in text for k in ("流程", "步骤", "环节", "怎么安排", "如何安排")):
+        return f"{topic}流程说明：各阶段做什么、需要准备什么"
     return f"围绕 {question_id} 的高意图问题解答页"
 
 

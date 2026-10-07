@@ -37,7 +37,7 @@ const labels = {workbench:'工作台',projects:'诊断项目',actions:'优化清
 const pageIntro = {
  '工作台':'集中查看待处理事项和最近活动。',
  '诊断项目':'创建并管理 GEO 诊断项目。',
- '优化清单':'把诊断结论转成可执行的改善任务。',
+ '优化清单':'把诊断结论转成可执行的优化项。',
  '内容生产':'确认写作任务书与素材，生成初稿。',
  '内容库':'查看、编辑与审核所有生成的初稿。',
  '批量发布':'把已审核的内容一次投到多个平台。',
@@ -55,10 +55,46 @@ const route = () => { const [rawView='', query=''] = location.hash.slice(1).spli
 const link = (view, project, tab) => '#'+view+(project?'?project='+encodeURIComponent(project)+(tab?'&tab='+tab:''):'');
 // 首轮候选不合格时后端会再请求一次（每次最多 60 秒），前端须覆盖完整链路，避免先报超时。
 const QUESTION_SUGGESTION_TIMEOUT = 150000;
+const CONTENT_GENERATION_TIMEOUT = 320000;
 async function api(path, method='GET', body, timeout=20000) { const abort=new AbortController(),deadline=setTimeout(()=>abort.abort(),timeout);try{const r=await fetch(API+path,{method,signal:abort.signal,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})}); const d=await r.json().catch(()=>({})); if(!r.ok) throw Error(typeof d.detail==='string'?d.detail:'提交信息有误，请检查填写内容'); return d;}catch(e){if(e.name==='AbortError')throw Error('请求超时，请刷新核对是否已保存，避免重复提交');if(e instanceof TypeError)throw Error('服务连接失败，请确认本地服务已启动后重新加载');throw e;}finally{clearTimeout(deadline);} }
 // 上传不能自己设 Content-Type，否则 multipart 的 boundary 会丢。
 async function apiUpload(path, formData) { const abort=new AbortController(),deadline=setTimeout(()=>abort.abort(),180000);try{const r=await fetch(API+path,{method:'POST',body:formData,signal:abort.signal}); const d=await r.json().catch(()=>({})); if(!r.ok) throw Error(typeof d.detail==='string'?d.detail:'上传失败，请检查文件后重试'); return d;}catch(e){if(e.name==='AbortError')throw Error('上传超时，请改用更小的文件或稍后重试');if(e instanceof TypeError)throw Error('服务连接失败，请确认本地服务已启动后重新加载');throw e;}finally{clearTimeout(deadline);} }
 function notice(text) { $('#notice').textContent=text; $('#notice').hidden=!text; }
+// 长任务进度：写独立的 #progress，不写 #notice——后者是 aria-live 区，每秒改写会让读屏
+// 持续播报，而且会把别处的提示（保存成功等）冲掉。起止各播报一次走 sr-only 的 #live。
+function progress(text) { const el=$('#progress'); el.textContent=text; el.hidden=!text; }
+// 长任务的唯一进度范式：禁用按钮 + 页面内进度条（真实已用秒数）。
+// 不用弹窗：<dialog> 会阻断整页交互，而生成要一两分钟，期间用户需要能切到别的页面看东西
+// （`#lib-regen` 原先就挂在弹窗里，表现为「确认按钮变灰但没有任何正在进行的信息」）。
+// 也做不出真实百分比：后端是一次同步请求，没有可查询的中间状态。
+const SLOW_TASK_SECONDS = 180;
+function runWithProgress(selector, label, task) {
+ let button=$(selector), original=button?button.textContent:'';
+ const started=Date.now();
+ const paint=()=>{
+  // render() 可能在任务途中重建 DOM（例如 OCR 轮询），所以每次都按 selector 重新取：
+  // 否则新按钮会渲染成「可点」的样子，既丢了「生成中…」又开了重复提交的口子。
+  const el=$(selector);
+  if(el){original=el.textContent==='生成中…'?original:el.textContent;button=el;el.disabled=true;el.textContent='生成中…';}
+  const seconds=Math.round((Date.now()-started)/1000);
+  progress(seconds>SLOW_TASK_SECONDS
+   ?`${label}：已用 ${seconds} 秒，比平时慢一些，请继续等待，不要重复提交。`
+   :`${label} · 已用 ${seconds} 秒（通常 1–3 分钟，最长约 5 分钟）。请不要重复点击，跑完会自动提示；期间可以切到别的页面。`);
+ };
+ paint();
+ $('#live').textContent=`${label}已开始，最长约 5 分钟，跑完会自动提示。`;
+ const timer=setInterval(paint,1000);
+ return Promise.resolve().then(task).finally(()=>{
+  clearInterval(timer); progress('');
+  if(button&&button.isConnected&&button.textContent==='生成中…'){button.disabled=false;button.textContent=original;}
+ });
+}
+// 超时与真失败要分开说：超时意味着「可能已经生成」，不能简单让人重试。
+function generationFailure(err) {
+ return /超时/.test(err.message)
+  ?'生成请求超时：不确定是否已生成，请刷新后到内容库核对，再决定要不要重试。'
+  :`未生成：${err.message}`;
+}
 function head(title, action='', subtitle=pageIntro[title]||'') {
  return `<div class="page-lead"><div><h1>${esc(title)}</h1>${subtitle?`<p>${esc(subtitle)}</p>`:''}</div>${action?`<div class="page-actions">${action}</div>`:''}</div>`;
 }
@@ -230,7 +266,7 @@ async function render() {
     runCopy=r.paused?`待处理：${(r.waiting_tasks||[]).join('、')}。请在诊断浏览器中完成登录或验证码，系统不会重新提交当前问题。`:'已完成的结果会持续保存，可以稍后返回查看。';
     operations=[...(r.paused?[['resume','已处理验证','primary']]:[]),['stop','停止诊断','danger']];
    }else if(r.status==='completed'){
-    runTitle='本次诊断已完成';runCopy='任务结果和证据已经保存，可以查看诊断报告，或据此生成改善任务。';
+    runTitle='本次诊断已完成';runCopy='任务结果和证据已经保存，可以查看诊断报告，或据此生成优化清单。';
    }else if(r.status==='degraded'){
     runTitle='报告已生成，但证据不完整';runCopy=r.blocker||'请先核对缺失的结果或证据。';
    }else if(r.status==='archived'){
@@ -241,7 +277,7 @@ async function render() {
    const reportButton=reportReady?`<a class="button" href="${link('reports',slug)}&run=${encodeURIComponent(selected)}">查看诊断报告</a>`:'';
    const platformRows=platformStates.map(p=>`<div class="run-platform-row"><strong>${esc(p.label)}</strong><span class="run-platform-state ${p.tone}">${esc(p.labelText)}</span></div>`).join('')||'<p class="run-platform-empty">本批次没有平台任务</p>';
    v.innerHTML=`<section class="panel run-panel"><div class="run-batchbar"><select id="batch" aria-label="诊断批次">${d.runs.map(x=>`<option value="${esc(x.id)}" ${x.id===selected?'selected':''}>${esc(localTimeSec(x.created_at))} · ${esc(states[x.status]||x.status)}</option>`).join('')}</select><div class="run-counts"><span>成功 <strong>${r.state.success||0}</strong></span><span>失败 <strong>${r.state.failed||0}</strong></span><span>待执行 <strong>${r.state.pending||0}</strong></span></div></div><div class="run-control ${esc(r.status)}"><div class="run-control-main"><p class="run-kicker">${esc(states[r.status]||r.status)}</p><h2>${esc(runTitle)}</h2><p class="muted">${esc(runCopy)}</p><div class="run-actions">${operations.map(([k,l,c])=>`<button data-op="${k}" class="${c||''}">${esc(l)}</button>`).join('')}${reportButton}</div>${r.status==='login'?'<p class="run-help">登录完成后点击“已完成登录”，系统将关闭登录窗口并返回待检查状态。</p>':''}</div><aside class="run-platforms"><p class="run-platform-head">平台状态</p>${platformRows}</aside></div><div class="run-task-head"><h3>诊断任务</h3><span>共 ${r.tasks.length} 项</span></div><div class="table-scroll"><table><thead><tr><th>任务</th><th>平台</th><th>状态</th><th>结果</th></tr></thead><tbody>${r.tasks.map(t=>`<tr><td><strong>${esc(t.question_id)}</strong><div class="muted" style="max-width:480px;margin-top:5px">${esc(t.prompt)}</div></td><td>${esc(t.platform_label)}</td><td>${badge(t.status)}</td><td>${r.observations.some(o=>o.task_id===t.task_id)?`<button data-result="${esc(t.task_id)}" aria-expanded="false">查看回答与证据</button>`:esc(t.failure_reason||'')}</td></tr>`).join('')}</tbody></table></div></section>`;
-   if(['completed','degraded'].includes(r.status)){v.insertAdjacentHTML('afterbegin','<div class="toolbar"><button id="derive" class="primary">生成改善任务</button></div>');$('#derive').onclick=async()=>{try{const out=await api(base+'/runs/'+selected+'/improvements/derive','POST',{});notice(out.created?`已生成 ${out.created} 条改善任务`:'没有新的可生成项（仅取有证据的成功观测）');location.hash=link('actions',slug);}catch(err){notice(err.message);}};}
+   if(['completed','degraded'].includes(r.status)){v.insertAdjacentHTML('afterbegin','<div class="toolbar"><button id="derive" class="primary">生成优化清单</button></div>');$('#derive').onclick=async()=>{try{const out=await api(base+'/runs/'+selected+'/improvements/derive','POST',{});notice(out.created?`已生成 ${out.created} 条优化项`:'没有新的可生成项（仅取有证据的成功观测）');location.hash=link('actions',slug);}catch(err){notice(err.message);}};}
    $('#batch').onchange=e=>{location.hash=link('projects',slug,'runs')+'&run='+encodeURIComponent(e.target.value);};
    document.querySelectorAll('[data-op]').forEach(b=>b.onclick=async()=>{
     const op=b.dataset.op,path=base+'/runs/'+selected+'/'+op;
@@ -320,14 +356,14 @@ async function render() {
    const wantRun=params.get('run');
    if(wantRun&&rtab==='report'){const i=group.findIndex(r=>r.run_id===wantRun&&r.name==='diagnosis.md');if(i>=0)document.querySelector(`[data-report="${i}"]`)?.click();}
   } else {
-   // 各视图需要的清单不一样：改善任务、内容/内容库详情、发布与报告各自取自己的。
+   // 各视图需要的清单不一样：优化清单、内容/内容库详情、发布与报告各自取自己的。
    let items=[],batches=[];
    if(view==='actions'){const d=await api(base+'/editorial/actions');items=d.items;batches=d.batches||[];}
    else if(view==='content'||params.get('asset')) items=(await api(base+'/editorial/content')).items;
    if(token!==epoch)return;
    if(view==='actions') {
     // 按诊断批次折叠：默认全部收起，点批次名称才展开该批次的所有任务。
-    // 批次清单来自 execution_runs，所以「诊断完了但还没生成改善任务」的批次也在，不会被误以为上一批被覆盖。
+    // 批次清单来自 execution_runs，所以「诊断完了但还没生成优化清单」的批次也在，不会被误以为上一批被覆盖。
     const taskRow=x=>`<div class="row"><div><strong>${esc(x.title)}</strong> ${badge(x.status)}<p class="muted">${esc(x.description)}</p><a href="${link('projects',chosen.slug,'runs')+'&run='+x.run_id}">查看诊断依据</a></div><button data-create-asset="${x.id}">编写内容</button></div>`;
     const runLink=b=>link('projects',chosen.slug,'runs')+'&run='+encodeURIComponent(b.id);
     const derivable=s=>['completed','degraded'].includes(s);
@@ -336,12 +372,12 @@ async function render() {
      const meta=c.total?`共 ${c.total} 条 · 待办 ${c.todo||0} · 进行中 ${c.doing||0} · 已完成 ${c.done||0}`:'本批次还没有任务';
      const body=list.length
       ?list.map(taskRow).join('')
-      :`<div class="batch-empty"><p class="muted">本批次尚未生成改善任务。${derivable(b.status)?'请到「诊断执行」页点「生成改善任务」，只取有证据的成功观测。':`该批次状态为「${esc(states[b.status]||b.status)}」，当前不能生成改善任务。`}</p><a class="button" href="${runLink(b)}">去诊断执行</a></div>`;
+      :`<div class="batch-empty"><p class="muted">本批次尚未生成优化项。${derivable(b.status)?'请到「诊断执行」页点「生成优化清单」，只取有证据的成功观测。':`该批次状态为「${esc(states[b.status]||b.status)}」，当前不能生成优化项。`}</p><a class="button" href="${runLink(b)}">去诊断执行</a></div>`;
      return `<details class="batch" data-batch="${esc(b.id)}"><summary><span class="batch-name">${esc(localTimeSec(b.created_at))}</span>${badge(b.status)}<span class="batch-meta">${esc(meta)}</span></summary><div class="batch-body">${body}</div></details>`;
     };
     $('#module').innerHTML=batches.length
      ?`<div class="toolbar"><button id="toggle-batches" type="button">全部展开</button><span class="muted">共 ${batches.length} 个诊断批次，按时间从新到旧</span></div><section class="panel batch-list">${batches.map(group).join('')}</section>`
-     :'<p class="empty">暂无改善任务。完成诊断后可从结果生成。</p>';
+     :'<p class="empty">暂无优化清单。完成诊断后可从结果生成。</p>';
     const batchBoxes=()=>[...document.querySelectorAll('#module details.batch')];
     const syncToggle=()=>{const btn=$('#toggle-batches');if(btn)btn.textContent=batchBoxes().length&&batchBoxes().every(d=>d.open)?'全部收起':'全部展开';};
     if($('#toggle-batches'))$('#toggle-batches').onclick=()=>{const open=!batchBoxes().every(d=>d.open);batchBoxes().forEach(d=>{d.open=open;});syncToggle();};
@@ -399,7 +435,7 @@ async function render() {
      const runGenerate=async confirmOverwrite=>{
       try{
        const p=payload();
-       const out=await api(base+'/content/'+asset.id+'/generate','POST',{revision:asset.revision,confirm_overwrite:confirmOverwrite,brief:p.brief,channel:p.channel,audience:p.audience,objective:p.objective,tone:p.tone,keywords:p.keywords,target_length:p.target_length});
+       const out=await runWithProgress('#generate','正在生成初稿',()=>api(base+'/content/'+asset.id+'/generate','POST',{revision:asset.revision,confirm_overwrite:confirmOverwrite,brief:p.brief,channel:p.channel,audience:p.audience,objective:p.objective,tone:p.tone,keywords:p.keywords,target_length:p.target_length},CONTENT_GENERATION_TIMEOUT));
        await render();
        const quality=out.quality||{};
        const notes=out.notes||[];
@@ -410,9 +446,9 @@ async function render() {
          ${(out.warnings||[]).map(w=>`<p class="muted">△ ${esc(w)}</p>`).join('')}
          ${notes.length?`<ul class="gen-notes">${notes.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}`,
         async()=>{location.hash=link('library',chosen.slug)+'&asset='+asset.id;},'去内容库查看','留在本页');
-      }catch(err){notice(err.message);}
+      }catch(err){const m=generationFailure(err);notice(m);return {message:m};}
      };
-     $('#generate').onclick=()=>{if(generated)modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',()=>runGenerate(true),'确认覆盖并生成');else runGenerate(false);};
+     $('#generate').onclick=()=>{if(generated)modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',()=>{$('#modal').close();return runGenerate(true);},'确认覆盖并生成');else runGenerate(false);};
      // OCR 是后台跑的，没结束就隔几秒刷新一次状态
      const SRC_KIND={file:'附件',url:'网址',note:'文本'};
      const SRC_STATUS={ok:['已提取','good'],empty:['没提取到文字','warn'],failed:['提取失败','bad'],unsupported:['需人工说明','warn'],pending:['待提取','warn'],ocr_pending:['OCR 识别中','warn']};
@@ -444,7 +480,7 @@ async function render() {
     }else{
      const todo=items.filter(x=>/（待补充/.test(x.body||''));
      $('#module').innerHTML=`<div class="toolbar"><button id="direct" class="primary">＋ 新建内容任务书</button><a class="button" href="${link('library',chosen.slug)}">去内容库看已生成的初稿</a><span class="muted">确认任务书与素材后生成初稿。</span></div>
-      <section class="panel">${todo.map(x=>`<a class="row" href="${link('content',chosen.slug)+'&asset='+x.id}"><span>${esc(x.title)}<small>${x.channel?'渠道：'+esc(x.channel)+' · ':''}还没有生成初稿</small></span>${badge('待生成')}</a>`).join('')||'<p class="empty">没有待生成的任务书。可以从「改善任务」点「编写内容」，或直接新建。</p>'}</section>`;
+      <section class="panel">${todo.map(x=>`<a class="row" href="${link('content',chosen.slug)+'&asset='+x.id}"><span>${esc(x.title)}<small>${x.channel?'渠道：'+esc(x.channel)+' · ':''}还没有生成初稿</small></span>${badge('待生成')}</a>`).join('')||'<p class="empty">没有待生成的任务书。可以从「优化清单」点「编写内容」，或直接新建。</p>'}</section>`;
      $('#direct').onclick=()=>modal('新建内容任务书','<label>暂定标题<input name="title" required maxlength="200" autofocus placeholder="例如：设备资产管理系统选型指南"></label><label>写作要点<textarea name="brief" placeholder="要回答的问题\n需要覆盖的判断标准\n已有的可核验材料"></textarea></label><label>目标渠道<input name="channel" placeholder="例如：公众号长文 / 官网 / 知乎回答"></label><p class="muted">创建后上传素材并确认写作任务书，再生成初稿。</p>',async data=>{const r=await api(base+'/content','POST',Object.fromEntries(data));location.hash=link('content',chosen.slug)+'&asset='+r.id;},'创建任务书');
     }
    } else if(view==='library') {
@@ -518,7 +554,18 @@ async function render() {
       const values=()=>{const o=Object.fromEntries(new FormData(form));return {title:o.title,summary:o.summary,body:o.body,revision:libAsset.revision};};
       form.onsubmit=async e=>{e.preventDefault();try{const out=await api(base+'/content/'+libAsset.id,'PUT',values());await render();notice(`已保存（版本 ${out.revision}），原审核已失效`);}catch(err){notice(err.message);}};
       $('#lib-review').onclick=()=>{const v=values();const dirty=['title','summary','body'].some(k=>String(v[k]||'')!==String(libAsset[k]||''));if(dirty){notice('请先保存修改并重新通过质量检查');return;}openReview();};
-      $('#lib-regen').onclick=()=>modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',async()=>{const out=await api(base+'/content/'+libAsset.id+'/generate','POST',{revision:libAsset.revision,confirm_overwrite:true});return {message:`已重新生成（约 ${(out.quality||{}).plain_length||0} 字，引擎 ${out.engine}）`};},'确认覆盖并生成');
+      $('#lib-regen').onclick=()=>modal('确认重新生成','<p>重新生成会覆盖当前标题、摘要和正文。任务书与素材会保留。</p><label class="check"><input type="checkbox" required>我已确认覆盖当前稿件</label>',async()=>{
+       // 先关掉弹窗：<dialog> 挂 140 秒会阻断整页交互，进度改用和「生成初稿」一样的页面内状态条。
+       $('#modal').close();
+       try{
+        const out=await runWithProgress('#lib-regen','正在重新生成初稿',()=>api(base+'/content/'+libAsset.id+'/generate','POST',{revision:libAsset.revision,confirm_overwrite:true},CONTENT_GENERATION_TIMEOUT));
+        return {message:`已重新生成（约 ${(out.quality||{}).plain_length||0} 字，引擎 ${out.engine}）`};
+       }catch(err){
+        // 这里不能只 notice：modal 在 submit 返回后还会 await render()，而 render() 第一句
+        // 就是 notice('')，直接写的提示会被立刻清掉。必须把话交给 modal，由它在 render 之后播报。
+        return {message:generationFailure(err)};
+       }
+      },'确认覆盖并生成');
      }
     }
 

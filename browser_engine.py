@@ -340,7 +340,7 @@ def _worker(job):
                     detail = '、'.join(problems[:4]) if problems else '结果校验未通过'
                     transition(slug,rid,'degraded',
                                f'报告已生成，但 {len(problems) or 1} 个任务的证据不完整：{detail}。'
-                               '可以查看报告与证据、从完整观测生成改善任务；已提交的问题不得重试')
+                               '可以查看报告与证据、从完整观测生成优化清单；已提交的问题不得重试')
                 elif leaks:
                     transition(slug,rid,'degraded',
                                f'报告已生成，但文案体检发现 {len(leaks)} 处与本次主体无关的行业词：{"、".join(leaks[:5])}。'
